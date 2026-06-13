@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 from uuid import uuid4
@@ -20,11 +21,14 @@ from .live_runtime import LiveRuntimeReport, LiveRuntimeRunner, MT5DeploymentPro
 from .news import build_news_snapshot
 from .orchestrator import TSPV2Orchestrator
 from .persistence import RecoveryEventRecord, SQLiteRuntimeStore, SCHEMA_VERSION
+from .snapshots import TIMEFRAME_MINUTES, build_market_snapshot
 
 
 DEPLOYMENT_VERSION = "V2"
 DEFAULT_LOCK_FILENAME = "tsp_v2.lock"
 DEFAULT_STALE_LOCK_SECONDS = 12 * 60 * 60
+STARTUP_SYNC_BUFFER_SECONDS = 5
+STARTUP_SYNC_TIMEOUT_SECONDS = 15 * 60
 
 
 class DeploymentProbe(Protocol):
@@ -400,6 +404,8 @@ class DeploymentRuntime:
     ) -> DeploymentStartReport:
         probe_to_close: MT5DeploymentProbe | None = None
         live_report: LiveRuntimeReport | None = None
+        bootstrap_report: Any | None = None
+        metadata: DeploymentMetadata | None = None
         if not dry_run and probe is None:
             probe_to_close = self._build_live_probe()
             probe = probe_to_close
@@ -423,20 +429,19 @@ class DeploymentRuntime:
 
         store = self._ensure_store()
         startup_time_utc = preflight.startup_time_utc
-        metadata = DeploymentMetadata(
-            version=DEPLOYMENT_VERSION,
-            schema_version=SCHEMA_VERSION,
-            config_fingerprint=self.config.fingerprint,
-            startup_time_utc=startup_time_utc,
-            mode=self.config.bot.mode.value,
-            profile=self.config.bot.profile.value,
-            dry_run=dry_run,
-        )
         try:
-            self._persist_startup_metadata(metadata=metadata)
             orchestrator = self._ensure_orchestrator()
-            live_report = None
             if dry_run:
+                metadata = DeploymentMetadata(
+                    version=DEPLOYMENT_VERSION,
+                    schema_version=SCHEMA_VERSION,
+                    config_fingerprint=self.config.fingerprint,
+                    startup_time_utc=startup_time_utc,
+                    mode=self.config.bot.mode.value,
+                    profile=self.config.bot.profile.value,
+                    dry_run=dry_run,
+                )
+                self._persist_startup_metadata(metadata=metadata)
                 bootstrap_report = orchestrator.bootstrap(
                     broker_positions=(),
                     current_time_utc=startup_time_utc,
@@ -447,11 +452,27 @@ class DeploymentRuntime:
                     bridge = probe_to_close.bridge
                 else:
                     bridge = self._ensure_bridge()
+                if not bool(getattr(bridge, "connected", False)):
                     connect_status = bridge.connect()
                     if not connect_status.ok:
                         raise ConfigValidationError(f"MT5 live connection failed: {connect_status.message}")
                 market_adapter = self._ensure_market_adapter(bridge)
                 execution_adapter = self._ensure_execution_adapter(bridge, store)
+                startup_time_utc = self._wait_for_startup_snapshot_readiness(
+                    store=store,
+                    market_adapter=market_adapter,
+                    current_time_utc=startup_time_utc,
+                )
+                metadata = DeploymentMetadata(
+                    version=DEPLOYMENT_VERSION,
+                    schema_version=SCHEMA_VERSION,
+                    config_fingerprint=self.config.fingerprint,
+                    startup_time_utc=startup_time_utc,
+                    mode=self.config.bot.mode.value,
+                    profile=self.config.bot.profile.value,
+                    dry_run=dry_run,
+                )
+                self._persist_startup_metadata(metadata=metadata)
                 bootstrap_report = orchestrator.bootstrap(
                     broker_positions=(),
                     broker_truth_provider=bridge,
@@ -492,8 +513,12 @@ class DeploymentRuntime:
             if probe_to_close is not None:
                 probe_to_close.close()
         except Exception:
+            if probe_to_close is not None:
+                probe_to_close.close()
             self.shutdown(reason="startup_failure", emergency=True, current_time_utc=startup_time_utc)
             raise
+        assert metadata is not None
+        assert bootstrap_report is not None
         start_report = DeploymentStartReport(
             preflight=preflight,
             bootstrap_report=bootstrap_report,
@@ -638,6 +663,118 @@ class DeploymentRuntime:
             primary_symbol=self._primary_symbol(),
             symbols=self.config.symbols.allowlist,
         )
+
+    def _wait_for_startup_snapshot_readiness(
+        self,
+        *,
+        store: SQLiteRuntimeStore,
+        market_adapter: MT5MarketAdapter,
+        current_time_utc: datetime,
+    ) -> datetime:
+        del current_time_utc
+        deadline = _now_utc() + timedelta(seconds=STARTUP_SYNC_TIMEOUT_SECONDS)
+        primary_symbol = self._primary_symbol()
+        last_diagnostics: dict[str, Any] | None = None
+        while True:
+            broker_time = _ensure_utc(market_adapter.get_broker_time(), field_name="broker_time_utc")
+
+            def diagnostics_hook(payload: dict[str, Any]) -> None:
+                nonlocal last_diagnostics
+                last_diagnostics = dict(payload)
+                store.store_telemetry_index("deployment.market_data_readiness", payload)
+
+            try:
+                build_market_snapshot(
+                    market_adapter,
+                    config=self.config,
+                    symbol=primary_symbol,
+                    cycle_time_utc=broker_time,
+                    previous_cycle_time_utc=None,
+                    diagnostics_hook=diagnostics_hook,
+                )
+            except ConfigValidationError as exc:
+                stage = str(last_diagnostics.get("stage")) if last_diagnostics is not None else ""
+                if stage == "closed_bars_insufficient" and last_diagnostics is not None:
+                    retry_after_seconds = self._startup_sync_retry_after_seconds(
+                        broker_time=broker_time,
+                        timeframe=str(last_diagnostics.get("timeframe", "M5")),
+                    )
+                    self._emit_telemetry(
+                        store,
+                        "deployment.startup_sync",
+                        {
+                            "stage": "waiting_for_snapshot_readiness",
+                            "broker_time": broker_time.isoformat(),
+                            "snapshot_ready": False,
+                            "timeframe": last_diagnostics.get("timeframe"),
+                            "closed_bar_count": last_diagnostics.get("closed_bar_count"),
+                            "minimum_closed_bar_count": last_diagnostics.get("minimum_closed_bar_count"),
+                            "next_retry_after_seconds": retry_after_seconds,
+                        },
+                    )
+                    if _now_utc() >= deadline:
+                        self._emit_telemetry(
+                            store,
+                            "deployment.startup_sync",
+                            {
+                                "stage": "startup_sync_timeout",
+                                "broker_time": broker_time.isoformat(),
+                                "snapshot_ready": False,
+                                "timeframe": last_diagnostics.get("timeframe"),
+                                "closed_bar_count": last_diagnostics.get("closed_bar_count"),
+                                "minimum_closed_bar_count": last_diagnostics.get("minimum_closed_bar_count"),
+                                "next_retry_after_seconds": retry_after_seconds,
+                            },
+                        )
+                        raise ConfigValidationError("Startup synchronization timed out") from exc
+                    time.sleep(max(0.0, float(retry_after_seconds)))
+                    continue
+                if stage in {"rates_fetch_failed", "payload_rejected"}:
+                    self._emit_telemetry(
+                        store,
+                        "deployment.startup_sync",
+                        {
+                            "stage": "startup_sync_failed",
+                            "broker_time": broker_time.isoformat(),
+                            "snapshot_ready": False,
+                            "timeframe": last_diagnostics.get("timeframe") if last_diagnostics is not None else None,
+                            "closed_bar_count": last_diagnostics.get("closed_bar_count") if last_diagnostics is not None else None,
+                            "minimum_closed_bar_count": last_diagnostics.get("minimum_closed_bar_count") if last_diagnostics is not None else None,
+                            "next_retry_after_seconds": 0,
+                        },
+                    )
+                    raise
+                raise
+            self._emit_telemetry(
+                store,
+                "deployment.startup_sync",
+                {
+                    "stage": "snapshot_ready",
+                    "broker_time": broker_time.isoformat(),
+                    "snapshot_ready": True,
+                    "timeframe": last_diagnostics.get("timeframe") if last_diagnostics is not None else None,
+                    "closed_bar_count": last_diagnostics.get("closed_bar_count") if last_diagnostics is not None else None,
+                    "minimum_closed_bar_count": last_diagnostics.get("minimum_closed_bar_count") if last_diagnostics is not None else None,
+                    "next_retry_after_seconds": 0,
+                },
+            )
+            return broker_time
+
+    def _startup_sync_retry_after_seconds(self, *, broker_time: datetime, timeframe: str) -> int:
+        timeframe_name = timeframe.upper()
+        minutes = TIMEFRAME_MINUTES.get(timeframe_name)
+        if minutes is None:
+            return max(STARTUP_SYNC_BUFFER_SECONDS, int(self.config.bot.poll_interval_seconds))
+        normalized = broker_time.replace(second=0, microsecond=0)
+        boundary_minute = (normalized.minute // minutes) * minutes
+        boundary = normalized.replace(minute=boundary_minute)
+        next_close = boundary + timedelta(minutes=minutes)
+        target = next_close + timedelta(seconds=STARTUP_SYNC_BUFFER_SECONDS)
+        seconds = int((target - broker_time).total_seconds())
+        return max(STARTUP_SYNC_BUFFER_SECONDS, seconds)
+
+    def _emit_telemetry(self, store: SQLiteRuntimeStore, topic: str, payload: Mapping[str, Any]) -> None:
+        store.store_telemetry_index(topic, payload)
 
     def _sync_execution_registry_from_store(self, store: SQLiteRuntimeStore) -> None:
         if self.execution_adapter is None or self.execution_adapter.registry is None:

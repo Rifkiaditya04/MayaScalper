@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import time
@@ -142,6 +143,7 @@ class LiveRuntimeRunner:
             governor_state=self.config.governor.initial_state,
             started_at_utc=_now_utc(),
         )
+        self._restore_runtime_state()
 
     def run(
         self,
@@ -172,6 +174,10 @@ class LiveRuntimeRunner:
                 raise ConfigValidationError("Bootstrap reconciliation is not ready to resume live runtime")
             while max_cycles is None or cycles_completed < max_cycles:
                 cycle_report = self._run_cycle()
+                if cycle_report is None:
+                    if max_cycles is None or cycles_completed < max_cycles:
+                        time.sleep(max(0.0, float(self.config.bot.poll_interval_seconds)))
+                    continue
                 last_cycle = cycle_report
                 cycles_completed += 1
                 self._emit_telemetry(
@@ -252,7 +258,7 @@ class LiveRuntimeRunner:
             last_cycle=last_cycle,
         )
 
-    def _run_cycle(self) -> LiveCycleReport:
+    def _run_cycle(self) -> LiveCycleReport | None:
         broker_time = self.market_adapter.get_broker_time()
         market_status = self.market_adapter.market_status(now_utc=broker_time)
         if not market_status.ok:
@@ -267,8 +273,6 @@ class LiveRuntimeRunner:
         )
 
         snapshots: dict[str, MarketSnapshot] = {}
-        regimes: dict[str, Any] = {}
-        signal_evaluations: list[SignalEvaluation] = []
         for symbol in self.config.symbols.allowlist:
             snapshot = build_market_snapshot(
                 self.market_adapter,
@@ -279,6 +283,16 @@ class LiveRuntimeRunner:
                 diagnostics_hook=lambda payload: self._emit_telemetry("deployment.market_data_readiness", payload),
             )
             snapshots[symbol] = snapshot
+
+        primary_symbol = self.config.symbols.allowlist[0]
+        primary_snapshot = snapshots[primary_symbol]
+        current_m5_close_utc = self._latest_closed_m5_close(primary_snapshot)
+        if not self._closed_m5_gate_allows_process(current_m5_close_utc):
+            return None
+
+        regimes: dict[str, Any] = {}
+        signal_evaluations: list[SignalEvaluation] = []
+        for symbol, snapshot in snapshots.items():
             regime = classify_regime(snapshot)
             regimes[symbol] = regime
             evaluation = evaluate_signals(
@@ -303,8 +317,6 @@ class LiveRuntimeRunner:
             ),
         )
 
-        primary_symbol = self.config.symbols.allowlist[0]
-        primary_snapshot = snapshots[primary_symbol]
         governor_context = self._governor_context(
             snapshot=primary_snapshot,
             broker_account=broker_account,
@@ -399,6 +411,7 @@ class LiveRuntimeRunner:
             allow_flatten_unresolved=True,
         )
         self.last_reconciliation_report = reconciliation
+        self.runtime_state.last_processed_m5_close_utc = current_m5_close_utc
         self._store_runtime_snapshot(
             broker_time=broker_time,
             market_status=market_status,
@@ -436,6 +449,11 @@ class LiveRuntimeRunner:
                 "runtime.mode": self.config.bot.mode.value,
                 "runtime.governor_state": cycle_report.governor_state.value,
                 "runtime.last_cycle_time_utc": cycle_report.cycle_time_utc.isoformat(),
+                "runtime.last_processed_m5_close_utc": (
+                    self.runtime_state.last_processed_m5_close_utc.isoformat()
+                    if self.runtime_state.last_processed_m5_close_utc is not None
+                    else None
+                ),
                 "runtime.last_broker_time_utc": cycle_report.broker_time_utc.isoformat(),
                 "runtime.selected_symbols": list(cycle_report.selected_symbols),
                 "runtime.execution_count": cycle_report.execution_count,
@@ -525,6 +543,70 @@ class LiveRuntimeRunner:
                 "partial_fill": result.partial_fill,
             },
         )
+
+    def _closed_m5_gate_allows_process(self, current_m5_close_utc: datetime) -> bool:
+        last_processed = self.runtime_state.last_processed_m5_close_utc
+        decision = "process"
+        if last_processed is not None and current_m5_close_utc <= last_processed:
+            decision = "skip"
+        self._emit_telemetry(
+            "deployment.closed_m5_gate",
+            {
+                "cycle_time_utc": current_m5_close_utc.isoformat(),
+                "current_m5_close": current_m5_close_utc.isoformat(),
+                "last_processed_m5_close": last_processed.isoformat() if last_processed is not None else None,
+                "decision": decision,
+            },
+        )
+        return decision == "process"
+
+    def _latest_closed_m5_close(self, snapshot: MarketSnapshot) -> datetime:
+        closes = [bar["close_time_utc"] for bar in snapshot.bars_m5]
+        if not closes:
+            raise ConfigValidationError("M5 snapshot is missing closed bars")
+        latest = max(closes)
+        if not isinstance(latest, datetime):
+            raise ConfigValidationError("M5 snapshot close timestamps are invalid")
+        return _ensure_utc(latest, field_name="latest_closed_m5_close_utc")
+
+    def _restore_runtime_state(self) -> None:
+        raw_state = self.store.load_runtime_state()
+        governor_state = self._runtime_state_value(raw_state, "runtime.governor_state")
+        if isinstance(governor_state, str) and governor_state:
+            try:
+                self.runtime_state.governor_state = GovernorState(governor_state)
+            except ValueError:
+                pass
+        last_cycle_time = self._runtime_state_datetime(raw_state, "runtime.last_cycle_time_utc")
+        if last_cycle_time is not None:
+            self.runtime_state.last_cycle_time_utc = last_cycle_time
+            self.previous_cycle_time_utc = last_cycle_time
+        last_processed = self._runtime_state_datetime(raw_state, "runtime.last_processed_m5_close_utc")
+        if last_processed is not None:
+            self.runtime_state.last_processed_m5_close_utc = last_processed
+
+    def _runtime_state_value(self, raw_state: Mapping[str, str], key: str) -> Any:
+        raw_value = raw_state.get(key)
+        if raw_value is None:
+            return None
+        try:
+            return json.loads(raw_value)
+        except json.JSONDecodeError:
+            return raw_value
+
+    def _runtime_state_datetime(self, raw_state: Mapping[str, str], key: str) -> datetime | None:
+        value = self._runtime_state_value(raw_state, key)
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return _ensure_utc(value, field_name=key)
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        return _ensure_utc(parsed, field_name=key)
 
     def _emit_telemetry(self, topic: str, payload: Mapping[str, Any]) -> None:
         self.store.store_telemetry_index(topic, payload)

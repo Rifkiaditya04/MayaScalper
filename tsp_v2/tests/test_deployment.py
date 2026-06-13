@@ -7,13 +7,16 @@ import unittest
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from tsp_v2.adapters import MT5BridgeError, MT5BridgeStatus, MT5TradeResult
 from tsp_v2.config import load_config
 from tsp_v2.config_schema import ConfigValidationError
+import tsp_v2.deployment as deployment_module
 from tsp_v2.deployment import DeploymentRuntime, SingleInstanceLock
-from tsp_v2.enums import ClockHealth, Direction
+from tsp_v2.enums import ClockHealth, Direction, GovernorState, HealthState, PaceClassification
+from tsp_v2.live_runtime import LiveCycleReport, LiveRuntimeRunner
 from tsp_v2.persistence import SQLiteRuntimeStore
 
 
@@ -446,6 +449,200 @@ class DeploymentTests(unittest.TestCase):
             finally:
                 runtime.shutdown(reason="test_complete", current_time_utc=datetime(2026, 5, 29, 9, 1, 0, tzinfo=timezone.utc))
 
+    def test_start_waits_for_snapshot_readiness_before_bootstrap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = _load_config(root, allow_live_execution=True)
+            fake_bridge = FakeLiveBridge(
+                broker_time_value=datetime(2026, 5, 29, 9, 0, 30, tzinfo=timezone.utc),
+            )
+            runtime = DeploymentRuntime(config)
+            build_calls: list[datetime] = []
+            sleep_calls: list[float] = []
+
+            def fake_build_market_snapshot(
+                provider,
+                *,
+                config,
+                symbol,
+                cycle_time_utc,
+                previous_cycle_time_utc=None,
+                build_config=None,
+                diagnostics_hook=None,
+            ):
+                del provider, config, symbol, previous_cycle_time_utc, build_config
+                build_calls.append(cycle_time_utc)
+                if len(build_calls) == 1:
+                    payload = {
+                        "stage": "closed_bars_insufficient",
+                        "symbol": "XAUUSD",
+                        "timeframe": "M5",
+                        "cycle_time_utc": cycle_time_utc.isoformat(),
+                        "requested_bars": 70,
+                        "returned_bars": 70,
+                        "closed_bar_count": 69,
+                        "minimum_closed_bar_count": 70,
+                        "payload_health": "GREEN",
+                    }
+                    if diagnostics_hook is not None:
+                        diagnostics_hook(payload)
+                    raise ConfigValidationError("Not enough closed bars for timeframe M5: need at least 70")
+                payload = {
+                    "stage": "snapshot_ready",
+                    "symbol": "XAUUSD",
+                    "cycle_time_utc": cycle_time_utc.isoformat(),
+                    "requested_bars": {"M1": 40, "M5": 70, "M15": 40, "H1": 40},
+                    "returned_bars": {"M1": 40, "M5": 70, "M15": 40, "H1": 40},
+                    "closed_bar_count": {"M1": 40, "M5": 70, "M15": 40, "H1": 40},
+                    "payload_health": "GREEN",
+                }
+                if diagnostics_hook is not None:
+                    diagnostics_hook(payload)
+                return SimpleNamespace(cycle_time_utc=cycle_time_utc, bars_m5=())
+
+            with (
+                patch.object(DeploymentRuntime, "_build_live_probe", return_value=fake_bridge),
+                patch("tsp_v2.deployment.build_market_snapshot", side_effect=fake_build_market_snapshot),
+                patch.object(deployment_module.time, "sleep", side_effect=lambda seconds: sleep_calls.append(float(seconds))),
+            ):
+                report = runtime.start(
+                    dry_run=False,
+                    current_time_utc=datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc),
+                    max_cycles=0,
+            )
+
+            self.assertIsNotNone(report.bootstrap_report)
+            self.assertTrue(report.bootstrap_report.ready_to_resume)
+            self.assertIsNotNone(report.live_report)
+            assert report.live_report is not None
+            self.assertEqual(report.live_report.cycles_completed, 0)
+            self.assertEqual(fake_bridge.connect_calls, 1)
+            self.assertGreaterEqual(len(build_calls), 2)
+            self.assertTrue(sleep_calls)
+            self.assertGreater(sleep_calls[0], 0.0)
+
+            telemetry_db = sqlite3.connect(config.persistence.sqlite_path)
+            telemetry_db.row_factory = sqlite3.Row
+            rows = telemetry_db.execute(
+                """
+                SELECT payload_json
+                FROM telemetry_index
+                WHERE topic = 'deployment.startup_sync'
+                ORDER BY rowid ASC
+                """
+            ).fetchall()
+            telemetry_db.close()
+            self.assertGreaterEqual(len(rows), 2)
+            first_payload = json.loads(rows[0]["payload_json"])
+            last_payload = json.loads(rows[-1]["payload_json"])
+            self.assertEqual(first_payload["stage"], "waiting_for_snapshot_readiness")
+            self.assertFalse(first_payload["snapshot_ready"])
+            self.assertEqual(last_payload["stage"], "snapshot_ready")
+            self.assertTrue(last_payload["snapshot_ready"])
+            shutdown = runtime.shutdown(
+                reason="test_complete",
+                current_time_utc=datetime(2026, 5, 29, 9, 1, 0, tzinfo=timezone.utc),
+            )
+            self.assertTrue(shutdown.lock_released)
+
+    def test_closed_m5_gate_uses_latest_close_and_skips_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = _load_config(root, allow_live_execution=True)
+            store = SQLiteRuntimeStore(config.persistence.sqlite_path)
+            store.initialize()
+            store.set_config_fingerprint(config.fingerprint)
+            try:
+                runner = LiveRuntimeRunner(
+                    config=config,
+                    store=store,
+                    bridge=SimpleNamespace(),
+                    market_adapter=SimpleNamespace(),
+                    execution_adapter=SimpleNamespace(
+                        registry=SimpleNamespace(entries_by_setup_id={}, entries_by_submission_uuid={})
+                    ),
+                    bootstrap_report=SimpleNamespace(ready_to_resume=True),
+                )
+                older = datetime(2026, 5, 29, 9, 5, 0, tzinfo=timezone.utc)
+                latest = datetime(2026, 5, 29, 9, 10, 0, tzinfo=timezone.utc)
+                snapshot = SimpleNamespace(
+                    bars_m5=(
+                        {"close_time_utc": older},
+                        {"close_time_utc": latest},
+                        {"close_time_utc": datetime(2026, 5, 29, 9, 7, 0, tzinfo=timezone.utc)},
+                    )
+                )
+
+                self.assertEqual(runner._latest_closed_m5_close(snapshot), latest)
+                runner.runtime_state.last_processed_m5_close_utc = latest
+                self.assertFalse(runner._closed_m5_gate_allows_process(latest))
+
+                telemetry_db = sqlite3.connect(config.persistence.sqlite_path)
+                telemetry_db.row_factory = sqlite3.Row
+                rows = telemetry_db.execute(
+                    """
+                    SELECT payload_json
+                    FROM telemetry_index
+                    WHERE topic = 'deployment.closed_m5_gate'
+                    ORDER BY rowid DESC
+                    LIMIT 1
+                    """
+                ).fetchall()
+                telemetry_db.close()
+                self.assertTrue(rows)
+                payload = json.loads(rows[0]["payload_json"])
+                self.assertEqual(payload["decision"], "skip")
+                self.assertEqual(payload["current_m5_close"], latest.isoformat())
+                self.assertEqual(payload["last_processed_m5_close"], latest.isoformat())
+            finally:
+                store.close()
+
+    def test_run_counts_only_processed_cycles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = _load_config(root, allow_live_execution=True)
+            store = SQLiteRuntimeStore(config.persistence.sqlite_path)
+            store.initialize()
+            store.set_config_fingerprint(config.fingerprint)
+            try:
+                runner = LiveRuntimeRunner(
+                    config=config,
+                    store=store,
+                    bridge=SimpleNamespace(),
+                    market_adapter=SimpleNamespace(),
+                    execution_adapter=SimpleNamespace(
+                        registry=SimpleNamespace(entries_by_setup_id={}, entries_by_submission_uuid={})
+                    ),
+                    bootstrap_report=SimpleNamespace(ready_to_resume=True),
+                )
+                report = LiveCycleReport(
+                    cycle_time_utc=datetime(2026, 5, 29, 9, 10, 0, tzinfo=timezone.utc),
+                    broker_time_utc=datetime(2026, 5, 29, 9, 10, 0, tzinfo=timezone.utc),
+                    governor_state=GovernorState.NORMAL,
+                    governor_reason="test",
+                    selected_symbols=(),
+                    signal_count=0,
+                    execution_count=0,
+                    execution_results=(),
+                    reconciliation_ready=True,
+                    market_health=HealthState.GREEN,
+                    feed_health=HealthState.GREEN,
+                    pace_state=PaceClassification.ON_TRACK,
+                )
+                with (
+                    patch.object(LiveRuntimeRunner, "_run_cycle", side_effect=[None, None, report]),
+                    patch("tsp_v2.live_runtime.time.sleep", return_value=None),
+                ):
+                    runtime_report = runner.run(
+                        max_cycles=1,
+                        current_time_utc=datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc),
+                    )
+                self.assertEqual(runtime_report.cycles_completed, 1)
+                self.assertIsNotNone(runtime_report.last_cycle)
+                self.assertEqual(runtime_report.last_cycle, report)
+            finally:
+                store.close()
+
     def test_start_emits_market_data_readiness_on_bridge_rates_failure(self) -> None:
         class FailingRatesBridge(FakeLiveBridge):
             def get_rates(self, symbol: str, timeframe: str, count: int) -> tuple[dict[str, object], ...]:
@@ -498,7 +695,7 @@ class DeploymentTests(unittest.TestCase):
             telemetry_db.close()
             self.assertTrue(rows)
             payload = json.loads(rows[0]["payload_json"])
-            self.assertEqual(payload["stage"], "bridge_error")
+            self.assertEqual(payload["stage"], "rates_fetch_failed")
             self.assertEqual(payload["symbol"], "XAUUSD")
             self.assertEqual(payload["timeframe"], "M1")
             self.assertEqual(payload["requested_bars"], 40)

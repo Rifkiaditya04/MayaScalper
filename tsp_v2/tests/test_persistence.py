@@ -4,9 +4,11 @@ from datetime import datetime, timezone
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from tsp_v2.config import load_config
 from tsp_v2.enums import ExecutionRegistryState, GovernorState, PaceClassification
+from tsp_v2.live_runtime import LiveRuntimeRunner
 from tsp_v2.models import ExecutionRegistryEntry, GovernorDecision
 from tsp_v2.persistence import AccountStateRecord, SQLiteRuntimeStore, SCHEMA_VERSION
 
@@ -129,6 +131,39 @@ class PersistenceTests(unittest.TestCase):
                 record = store.load_governor_state()
                 self.assertIsNotNone(record)
                 self.assertEqual(record.state, GovernorState.NORMAL)
+            finally:
+                store.close()
+
+    def test_restore_runtime_state_includes_last_processed_m5_close(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = _load_config(root)
+            store = SQLiteRuntimeStore(config.persistence.sqlite_path)
+            try:
+                store.initialize()
+                store.set_config_fingerprint(config.fingerprint)
+                store.store_runtime_state(
+                    {
+                        "runtime.governor_state": "NORMAL",
+                        "runtime.last_cycle_time_utc": "2026-05-29T09:10:00+00:00",
+                        "runtime.last_processed_m5_close_utc": "2026-05-29T09:10:00+00:00",
+                    }
+                )
+                runner = LiveRuntimeRunner(
+                    config=config,
+                    store=store,
+                    bridge=SimpleNamespace(),
+                    market_adapter=SimpleNamespace(),
+                    execution_adapter=SimpleNamespace(
+                        registry=SimpleNamespace(entries_by_setup_id={}, entries_by_submission_uuid={})
+                    ),
+                    bootstrap_report=SimpleNamespace(ready_to_resume=True),
+                )
+                self.assertEqual(runner.runtime_state.governor_state, GovernorState.NORMAL)
+                expected_time = datetime(2026, 5, 29, 9, 10, 0, tzinfo=timezone.utc)
+                self.assertEqual(runner.runtime_state.last_cycle_time_utc, expected_time)
+                self.assertEqual(runner.runtime_state.last_processed_m5_close_utc, expected_time)
+                self.assertEqual(runner.previous_cycle_time_utc, expected_time)
             finally:
                 store.close()
 
