@@ -1,0 +1,189 @@
+{
+  "stage": "V2-V03",
+  "timestamp_utc": "20260530T112137Z",
+  "overall_pass": true,
+  "suite_returncode": 0,
+  "suite_log": "validation/V2-V03/logs/20260530T112137Z_full_suite.txt",
+  "runtime_hours": 0.25,
+  "runtime_cycles": 3,
+  "signals_generated": 3,
+  "orders_submitted": 2,
+  "telemetry_rows": 86,
+  "sessions": [
+    {
+      "session_id": 1,
+      "start_time_utc": "2026-05-29T09:00:00+00:00",
+      "preflight_ok": true,
+      "preflight_blocked_reason": "",
+      "bootstrap_ready": true,
+      "cycles_completed": 1,
+      "stopped_reason": "max_cycles_reached",
+      "last_cycle": {
+        "broker_time_utc": "2026-05-29T09:00:00+00:00",
+        "governor_state": "NORMAL",
+        "governor_reason": "normal",
+        "signal_count": 1,
+        "execution_count": 1,
+        "execution_results": [
+          {
+            "accepted": true,
+            "rejected": false,
+            "filled": true,
+            "partial_fill": false,
+            "ticket": 1,
+            "broker_code": "DONE",
+            "classification": "OK",
+            "retryable": false,
+            "fatal": false,
+            "terminal": true,
+            "submission_uuid": "269dcb3d055185792361fc71",
+            "setup_id": "c003ef45a2c290b467f9",
+            "symbol": "XAUUSD"
+          }
+        ],
+        "reconciliation_ready": true,
+        "market_health": "GREEN",
+        "feed_health": "GREEN",
+        "pace_state": "ON_TRACK",
+        "selected_symbols": [
+          "XAUUSD"
+        ]
+      },
+      "positions_after": [
+        {
+          "setup_id": "c003ef45a2c290b467f9",
+          "symbol": "XAUUSD",
+          "direction": "LONG",
+          "correlation_group": "XAUUSD",
+          "risk_pct": 0.64125,
+          "signal_score": 0.743333,
+          "open_time_utc": "2026-05-29T09:00:00+00:00",
+          "pyramid_count": 0,
+          "payload_json": "{\"setup_id\":\"c003ef45a2c290b467f9\",\"symbol\":\"XAUUSD\"}"
+        }
+      ],
+      "registry_count": 1,
+      "telemetry_rows": 14,
+      "recovery_rows": 5,
+      "shutdown_lock_released": true
+    },
+    {
+      "session_id": 2,
+      "start_time_utc": "2026-05-29T09:05:00+00:00",
+      "preflight_ok": true,
+      "preflight_blocked_reason": "",
+      "bootstrap_ready": true,
+      "cycles_completed": 1,
+      "stopped_reason": "max_cycles_reached",
+      "last_cycle": {
+        "broker_time_utc": "2026-05-29T09:05:00+00:00",
+        "governor_state": "NORMAL",
+        "governor_reason": "normal",
+        "signal_count": 1,
+        "execution_count": 1,
+        "execution_results": [
+          {
+            "accepted": true,
+            "rejected": false,
+            "filled": true,
+            "partial_fill": false,
+            "ticket": 1,
+            "broker_code": "DONE",
+            "classification": "OK",
+            "retryable": false,
+            "fatal": false,
+            "terminal": true,
+            "submission_uuid": "0c2b44640bd105c682bf5ab4",
+            "setup_id": "5ec99413f580f9b2afb9",
+            "symbol": "XAUUSD"
+          }
+        ],
+        "reconciliation_ready": true,
+        "market_health": "GREEN",
+        "feed_health": "GREEN",
+        "pace_state": "ON_TRACK",
+        "selected_symbols": [
+          "XAUUSD"
+        ]
+      },
+      "positions_after": [
+        {
+          "setup_id": "5ec99413f580f9b2afb9",
+          "symbol": "XAUUSD",
+          "direction": "LONG",
+          "correlation_group": "XAUUSD",
+          "risk_pct": 0.64125,
+          "signal_score": 0.743333,
+          "open_time_utc": "2026-05-29T09:05:00+00:00",
+          "pyramid_count": 0,
+          "payload_json": "{\"setup_id\":\"5ec99413f580f9b2afb9\",\"symbol\":\"XAUUSD\"}"
+        },
+        {
+          "setup_id": "c003ef45a2c290b467f9",
+          "symbol": "XAUUSD",
+          "direction": "LONG",
+          "correlation_group": "XAUUSD",
+          "risk_pct": 0.64125,
+          "signal_score": 0.743333,
+          "open_time_utc": "2026-05-29T09:00:00+00:00",
+          "pyramid_count": 0,
+          "payload_json": "{\"setup_id\":\"c003ef45a2c290b467f9\",\"symbol\":\"XAUUSD\"}"
+        }
+      ],
+      "registry_count": 2,
+      "telemetry_rows": 29,
+      "recovery_rows": 11,
+      "shutdown_lock_released": true
+    },
+    {
+      "session_id": 3,
+      "start_time_utc": "2026-05-29T09:10:00+00:00",
+      "preflight_ok": true,
+      "preflight_blocked_reason": "",
+      "bootstrap_ready": true,
+      "cycles_completed": 1,
+      "stopped_reason": "max_cycles_reached",
+      "last_cycle": {
+        "broker_time_utc": "2026-05-29T09:10:00+00:00",
+        "governor_state": "NORMAL",
+        "governor_reason": "normal",
+        "signal_count": 1,
+        "execution_count": 0,
+        "execution_results": [],
+        "reconciliation_ready": true,
+        "market_health": "GREEN",
+        "feed_health": "GREEN",
+        "pace_state": "ON_TRACK",
+        "selected_symbols": []
+      },
+      "positions_after": [
+        {
+          "setup_id": "5ec99413f580f9b2afb9",
+          "symbol": "XAUUSD",
+          "direction": "LONG",
+          "correlation_group": "XAUUSD",
+          "risk_pct": 0.64125,
+          "signal_score": 0.743333,
+          "open_time_utc": "2026-05-29T09:05:00+00:00",
+          "pyramid_count": 0,
+          "payload_json": "{\"setup_id\":\"5ec99413f580f9b2afb9\",\"symbol\":\"XAUUSD\"}"
+        },
+        {
+          "setup_id": "c003ef45a2c290b467f9",
+          "symbol": "XAUUSD",
+          "direction": "LONG",
+          "correlation_group": "XAUUSD",
+          "risk_pct": 0.64125,
+          "signal_score": 0.743333,
+          "open_time_utc": "2026-05-29T09:00:00+00:00",
+          "pyramid_count": 0,
+          "payload_json": "{\"setup_id\":\"c003ef45a2c290b467f9\",\"symbol\":\"XAUUSD\"}"
+        }
+      ],
+      "registry_count": 2,
+      "telemetry_rows": 43,
+      "recovery_rows": 17,
+      "shutdown_lock_released": true
+    }
+  ]
+}

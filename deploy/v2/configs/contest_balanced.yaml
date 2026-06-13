@@ -1,0 +1,13 @@
+bot:
+  mode: CONTEST
+  profile: CONTEST_BALANCED
+symbols:
+  allowlist:
+    - XAUUSD
+risk:
+  max_open_risk_pct: 1.25
+  max_daily_loss_pct: 6.0
+contest:
+  ranking_proxy_enabled: true
+deployment:
+  allow_live_execution: true

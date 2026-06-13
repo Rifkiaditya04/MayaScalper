@@ -1,0 +1,90 @@
+{
+  "stage": "V2-V02",
+  "timestamp_utc": "20260530T111303Z",
+  "overall_pass": false,
+  "suite_returncode": 1,
+  "suite_log": "validation/V2-V02/logs/20260530T111303Z_full_suite.txt",
+  "scenarios": [
+    {
+      "scenario": "A",
+      "name": "idle_kill_restart",
+      "pass": true,
+      "start1": {
+        "preflight_ok": true,
+        "blocked_reason": "",
+        "cycles": 1,
+        "reconciliation_ready": true,
+        "execution_count": 0,
+        "selected_symbols": []
+      },
+      "restart": {
+        "preflight_ok": true,
+        "blocked_reason": "",
+        "cycles": 1,
+        "reconciliation_ready": true,
+        "execution_count": 0,
+        "shutdown_locked": true
+      },
+      "error": ""
+    },
+    {
+      "scenario": "B",
+      "name": "active_signal_restart_duplicate_guard",
+      "pass": true,
+      "duplicate": true,
+      "duplicate_reason": "duplicate",
+      "bootstrap_ready": true,
+      "unresolved_setup_ids": [
+        "setup-1"
+      ],
+      "error": ""
+    },
+    {
+      "scenario": "C",
+      "name": "open_position_restart_reconcile",
+      "pass": false,
+      "start1": {
+        "preflight_ok": true,
+        "cycles": 1,
+        "reconciliation_ready": false,
+        "execution_count": 1,
+        "broker_positions_seeded": 8
+      },
+      "restart": {
+        "preflight_ok": true,
+        "cycles": 1,
+        "reconciliation_ready": false,
+        "execution_count": 0,
+        "shutdown_locked": true
+      },
+      "error": ""
+    },
+    {
+      "scenario": "D",
+      "name": "broker_disconnect_reconnect",
+      "pass": true,
+      "disconnect": {
+        "preflight_ok": false,
+        "blocked_reason": "broker_unavailable",
+        "broker_ready": false
+      },
+      "reconnect": {
+        "preflight_ok": true,
+        "cycles": 1,
+        "reconciliation_ready": true,
+        "shutdown_locked": true
+      },
+      "error": ""
+    },
+    {
+      "scenario": "E",
+      "name": "bootstrap_recovery_reconciliation",
+      "pass": true,
+      "ready_to_resume": true,
+      "filled_count": 1,
+      "registry_count": 1,
+      "unresolved_setup_ids": [],
+      "error": ""
+    }
+  ]
+}

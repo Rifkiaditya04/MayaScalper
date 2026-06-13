@@ -1,0 +1,10 @@
+bot:
+  mode: FORWARD_TEST
+  profile: FORWARD_SAFE
+symbols:
+  allowlist:
+    - GBPUSD
+    - GBPJPY
+    - EURUSD
+contest:
+  ranking_proxy_enabled: false

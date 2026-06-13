@@ -1,0 +1,49 @@
+{
+  "stage": "V2-V02",
+  "timestamp_utc": "20260530T111201Z",
+  "overall_pass": false,
+  "suite_returncode": 1,
+  "suite_log": "validation/V2-V02/logs/20260530T111201Z_full_suite.txt",
+  "scenarios": [
+    {
+      "scenario": "A",
+      "name": "scenario_a",
+      "pass": false,
+      "error": "AttributeError: 'LiveRuntimeReport' object has no attribute 'reconciliation_ready'"
+    },
+    {
+      "scenario": "B",
+      "name": "active_signal_restart_duplicate_guard",
+      "pass": true,
+      "duplicate": true,
+      "duplicate_reason": "duplicate",
+      "bootstrap_ready": true,
+      "unresolved_setup_ids": [
+        "setup-1"
+      ],
+      "error": ""
+    },
+    {
+      "scenario": "C",
+      "name": "scenario_c",
+      "pass": false,
+      "error": "AttributeError: 'LiveRuntimeReport' object has no attribute 'reconciliation_ready'"
+    },
+    {
+      "scenario": "D",
+      "name": "scenario_d",
+      "pass": false,
+      "error": "AttributeError: 'LiveRuntimeReport' object has no attribute 'reconciliation_ready'"
+    },
+    {
+      "scenario": "E",
+      "name": "bootstrap_recovery_reconciliation",
+      "pass": true,
+      "ready_to_resume": true,
+      "filled_count": 1,
+      "registry_count": 1,
+      "unresolved_setup_ids": [],
+      "error": ""
+    }
+  ]
+}

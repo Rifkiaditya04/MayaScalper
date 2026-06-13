@@ -1,0 +1,99 @@
+{
+  "validation_stage": "V2-V01",
+  "generated_at_utc": "2026-05-29T12:26:35.944156+00:00",
+  "config_fingerprint": "ac212ea8a889be096be8d1a1616fcbdc02cb49eb56de4375d68a875ee11e21f6",
+  "temp_root": "C:\\Users\\User\\AppData\\Local\\Temp\\tsp_v2_v01_xo7okcye",
+  "cli_preflight": {
+    "returncode": 0,
+    "output": "PRECHECK OK | mode=FORWARD_TEST | profile=FORWARD_SAFE | lock=validated | broker_ready=True | news_state=READY | reason=none"
+  },
+  "cli_start_dry_run": {
+    "returncode": 0,
+    "output": "STARTUP OK | mode=FORWARD_TEST | profile=FORWARD_SAFE | dry_run=True | bootstrap_ready=True | live_cycles=0"
+  },
+  "live_preflight": {
+    "ok": true,
+    "blocked_reason": "",
+    "broker_ready": true,
+    "clock_health": "OK",
+    "news_state": "READY",
+    "dry_run": false
+  },
+  "live_runtime": {
+    "cycles_completed": 1,
+    "stopped_reason": "max_cycles_reached",
+    "recovered": true,
+    "bootstrap_ready": true,
+    "last_cycle": {
+      "broker_time_utc": "2026-05-29T12:26:35.559227+00:00",
+      "governor_state": "NORMAL",
+      "governor_reason": "normal",
+      "selected_symbols": [
+        "XAUUSD"
+      ],
+      "signal_count": 1,
+      "execution_count": 1,
+      "reconciliation_ready": true,
+      "market_health": "GREEN",
+      "feed_health": "GREEN",
+      "pace_state": "ON_TRACK"
+    }
+  },
+  "shutdown": {
+    "reason": "validation_complete",
+    "emergency": false,
+    "lock_released": true,
+    "store_closed": true
+  },
+  "counts": {
+    "telemetry_index": 20,
+    "recovery_events": 10,
+    "execution_events": 1,
+    "execution_registry": 1,
+    "governor_state": 1,
+    "account_state": 1,
+    "runtime_state": 21
+  },
+  "telemetry_topics": [
+    "deployment.preflight",
+    "deployment.preflight",
+    "deployment.startup",
+    "deployment.shutdown",
+    "deployment.preflight",
+    "deployment.preflight",
+    "reconciliation_started",
+    "reconciliation_completed",
+    "runtime_started",
+    "runtime_recovered",
+    "reconciliation_started",
+    "reconciliation_completed",
+    "execution_filled",
+    "reconciliation_started",
+    "reconciliation_completed",
+    "runtime_cycle",
+    "runtime_cycle",
+    "runtime_stopped",
+    "deployment.startup",
+    "deployment.shutdown"
+  ],
+  "recovery_stages": [
+    "reconcile",
+    "bootstrap",
+    "deployment_start",
+    "deployment_shutdown",
+    "broker_reconciliation",
+    "bootstrap",
+    "deployment_start",
+    "broker_reconciliation",
+    "broker_reconciliation",
+    "deployment_shutdown"
+  ],
+  "execution_events": [
+    {
+      "submission_uuid": "863a7462bfb2640f51e885c1",
+      "event_type": "filled",
+      "event_time_utc": "2026-05-29T12:26:35.944156+00:00",
+      "payload_json": "{\"accepted\":true,\"broker_code\":\"DONE\",\"classification\":\"OK\",\"event_time_utc\":\"2026-05-29T12:26:35.559227+00:00\",\"fatal\":false,\"filled\":true,\"kind\":\"filled\",\"message\":\"filled\",\"partial_fill\":false,\"rejected\":false,\"retryable\":false,\"terminal\":true,\"ticket\":1}"
+    }
+  ]
+}

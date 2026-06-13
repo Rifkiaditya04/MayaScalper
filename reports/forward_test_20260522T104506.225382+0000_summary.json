@@ -1,0 +1,14 @@
+{
+  "bars_processed": 1,
+  "dry_run": false,
+  "ended_at": "2026-05-22T10:45:11.778335+00:00",
+  "executions_attempted": 0,
+  "executions_filled": 0,
+  "iterations": 2,
+  "last_execution_status": null,
+  "log_file": "D:\\Maya\\Scalper\\logs\\tsp_forward_test_20260522_104506.log",
+  "mode": "forward_test",
+  "report_file": "",
+  "signals_generated": 0,
+  "started_at": "2026-05-22T10:45:06.225382+00:00"
+}

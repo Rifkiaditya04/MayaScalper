@@ -1,0 +1,21 @@
+{
+  "consecutive_losses": 0,
+  "daily_baseline_equity": 99980.1,
+  "direction_locks": {},
+  "entry_pause_reason": null,
+  "entry_pause_until": null,
+  "last_entry_timestamp": "2026-05-21T13:05:13.497953+00:00",
+  "magic_number": 20260508,
+  "manual_ack_reason": null,
+  "manual_ack_required": false,
+  "manual_ack_timestamp": "2026-05-13T11:31:47.594829+00:00",
+  "manual_close_pause_until": null,
+  "session_peak_equity": 99983.4,
+  "soft_drawdown_tripped_today": false,
+  "symbol": "GBPUSD",
+  "trading_day_key": "2026-05-22",
+  "trading_disabled": false,
+  "trading_disabled_reason": null,
+  "updated_at": "2026-05-22T00:59:29.853171+00:00",
+  "version": 1
+}

@@ -1,0 +1,108 @@
+config_version: 1
+supported_symbol: "XAUUSD"
+
+bot:
+  magic_number: 20260577
+  poll_interval_seconds: 5
+  max_consecutive_bar_errors: 5
+  db_path: "../../runtime/db/tsp_aggressive.sqlite3"
+  log_dir: "../../logs"
+  state_dir: "../../runtime/aggressive"
+  config_last_known_good_path: "../../runtime/aggressive/config_last_known_good.yaml"
+  expert_mode: false
+
+risk:
+  r_weak: 0.20
+  r_normal: 0.50
+  r_good: 0.90
+  r_elite: 1.25
+  r_max_single: 1.50
+  mult_defensive: 0.60
+  mult_normal: 1.00
+  mult_aggressive: 1.20
+  equity_floor_ratio: 0.70
+  dd_pct_defensive: 2.0
+  dd_pct_kill: 4.0
+  losses_defensive: 3
+  losses_kill: 5
+  wins_for_aggressive: 5
+  daily_r_for_aggressive: 2.5
+  dd_max_for_aggressive: 0.5
+  pyramid_max_layers: 2
+  pyramid_min_profit_r: 1.0
+  pyramid_aggregate_cap: 2.5
+  reentry_max_attempts: 1
+  reentry_min_bars: 3
+  spread_min_base_ticks: 30.0
+
+regime:
+  atr_collapse_asia: 0.30
+  atr_collapse_other: 0.35
+  dead_spread_ratio: 4.0
+  trend_strength_min: 0.55
+  trend_adx_boost: 0.12
+  trend_adx_min: 22.0
+  breakout_compression_max: 0.80
+  breakout_burst_min: 1.50
+  breakout_adx_min: 16.0
+  breakout_adx_max: 40.0
+  slope_agree_min: 0.10
+  slope_bias_long_min: 0.08
+  breakout_secondary_min_count: 2
+  breakout_direction_emergence_min: 0.20
+  breakout_volume_expansion_min: 1.20
+  breakout_m5_expansion_min: 1.05
+
+signal:
+  threshold_trend: 55.0
+  threshold_breakout: 58.0
+  threshold_chop: 999.0
+  aggression_adj_aggressive: -7.0
+  aggression_adj_normal: 0.0
+  aggression_adj_defensive: 10.0
+  confidence_penalty_weight: 4.0
+  stale_bars: 3
+  stale_score_improvement_min: 8.0
+  roc_lookback_bars: 3
+  roc_min_atr_fraction: 0.20
+  pullback_min_depth_atr: 0.30
+  pullback_max_depth_atr: 2.50
+  spread_penalty_ratio_start: 1.30
+  breakout_atr_boost_multiplier: 1.30
+
+lifecycle:
+  tp_rr_pullback: 1.8
+  tp_rr_breakout: 2.2
+  be_trigger_r: 0.80
+  be_buffer_ticks: 3.0
+  trail_trigger_r: 1.50
+  trail_atr_multiplier: 1.20
+  trail_min_improve_ticks: 5.0
+  partial_trigger_r: 1.00
+  partial_size_ratio: 0.50
+  tp_attach_retry_limit: 3
+  orphan_unknown_action: "FLATTEN"
+
+execution:
+  signal_ttl_seconds: 90
+  spread_hard_veto_ratio: 2.50
+  spread_soft_penalty_ratio: 1.30
+  max_slippage_ticks: 10.0
+  market_order_retry_count: 2
+  market_order_timeout_seconds: 3
+  dedup_ttl_seconds: 120
+
+competition:
+  total_days: 30
+  target_total_pnl_r: 25.0
+  lead_protect_r: 12.0
+  sprint_pct: 0.15
+  session_risk_budget_r: 3.0
+  hunt_aggression_bias: 0.4
+  protect_aggression_bias: -0.6
+  sprint_aggression_bias: 0.8
+  hunt_threshold_modifier: -4.0
+  protect_threshold_modifier: 6.0
+  sprint_threshold_modifier: -8.0
+  circuit_loss_count: 3
+  circuit_session_pnl_r: -2.0

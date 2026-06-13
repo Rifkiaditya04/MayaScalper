@@ -1,0 +1,11 @@
+bot:
+  mode: CONTEST
+  profile: CONTEST_HUNTER
+symbols:
+  allowlist:
+    - XAUUSD
+risk:
+  max_open_risk_pct: 1.50
+  max_daily_loss_pct: 7.5
+deployment:
+  allow_live_execution: true

@@ -1,0 +1,22 @@
+﻿# virtualenv / interpreter
+pradita/
+venv/
+.venv/
+env/
+
+# python cache
+__pycache__/
+*.pyc
+
+# data & logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+logs/
+
+# secrets
+.env
+*.key
+credentials*.json
+secrets*.json

@@ -1,0 +1,7 @@
+{
+  "python.defaultInterpreterPath": "D:\\Maya\\pradita\\Scripts\\python.exe",
+  "python.terminal.activateEnvironment": false,
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}"
+  ]
+}

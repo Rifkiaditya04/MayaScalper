@@ -1,0 +1,11 @@
+bot:
+  mode: DIAGNOSTIC
+  profile: DIAGNOSTIC
+symbols:
+  allowlist:
+    - XAUUSD
+deployment:
+  allow_live_execution: false
+news:
+  provider_mode: DISABLED_DIAGNOSTIC_ONLY
+  source_path: null
