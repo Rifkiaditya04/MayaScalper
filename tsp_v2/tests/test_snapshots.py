@@ -308,6 +308,7 @@ class SnapshotTests(unittest.TestCase):
                     config=config,
                     symbol="XAUUSD",
                     cycle_time_utc=cycle_time,
+                    build_config=SnapshotBuildConfig(m5_bars=70),
                     diagnostics_hook=diagnostics.append,
                 )
         self.assertTrue(diagnostics)

@@ -478,9 +478,9 @@ class DeploymentTests(unittest.TestCase):
                         "symbol": "XAUUSD",
                         "timeframe": "M5",
                         "cycle_time_utc": cycle_time_utc.isoformat(),
-                        "requested_bars": 70,
-                        "returned_bars": 70,
-                        "closed_bar_count": 69,
+                        "requested_bars": 71,
+                        "returned_bars": 71,
+                        "closed_bar_count": 70,
                         "minimum_closed_bar_count": 70,
                         "payload_health": "GREEN",
                     }
@@ -491,8 +491,8 @@ class DeploymentTests(unittest.TestCase):
                     "stage": "snapshot_ready",
                     "symbol": "XAUUSD",
                     "cycle_time_utc": cycle_time_utc.isoformat(),
-                    "requested_bars": {"M1": 40, "M5": 70, "M15": 40, "H1": 40},
-                    "returned_bars": {"M1": 40, "M5": 70, "M15": 40, "H1": 40},
+                    "requested_bars": {"M1": 40, "M5": 71, "M15": 40, "H1": 40},
+                    "returned_bars": {"M1": 40, "M5": 71, "M15": 40, "H1": 40},
                     "closed_bar_count": {"M1": 40, "M5": 70, "M15": 40, "H1": 40},
                     "payload_health": "GREEN",
                 }
