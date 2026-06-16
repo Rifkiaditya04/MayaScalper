@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Any, Callable, Sequence
@@ -87,6 +88,21 @@ def build_market_snapshot(
             for index, bar in enumerate(bars)
         ]
 
+    def build_raw_bar_stats(bars: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        close_times = [bar["close_time_utc"] for bar in bars]
+        return {
+            "closed_count": sum(1 for bar in bars if bar["close_time_utc"] <= cycle_utc),
+            "forming_count": sum(
+                1 for bar in bars if bar["timestamp"] <= cycle_utc < bar["close_time_utc"]
+            ),
+            "future_count": sum(1 for bar in bars if bar["timestamp"] > cycle_utc),
+            "duplicate_close_time_count": sum(
+                count - 1 for count in Counter(close_times).values() if count > 1
+            ),
+            "oldest_close_time_utc": min(close_times).isoformat() if close_times else None,
+            "latest_close_time_utc": max(close_times).isoformat() if close_times else None,
+        }
+
     def fetch_rates(timeframe: str, count: int) -> Sequence[Any]:
         try:
             return provider.get_rates(symbol, timeframe, count)
@@ -96,6 +112,7 @@ def build_market_snapshot(
                 {
                     "stage": "rates_fetch_failed",
                     "symbol": symbol_name,
+                    "broker_time_utc": cycle_utc.isoformat(),
                     "timeframe": timeframe,
                     "cycle_time_utc": cycle_utc.isoformat(),
                     "requested_bars": count,
@@ -132,6 +149,7 @@ def build_market_snapshot(
             {
                 "stage": "payload_rejected",
                 "symbol": symbol_name,
+                "broker_time_utc": cycle_utc.isoformat(),
                 "cycle_time_utc": cycle_utc.isoformat(),
                 "requested_bars": requested_counts,
                 "returned_bars": raw_counts,
@@ -169,20 +187,30 @@ def build_market_snapshot(
         "M15": ATR_PERIOD + ATR_BASELINE_PERIOD,
         "H1": ATR_PERIOD + ATR_BASELINE_PERIOD,
     }
+    raw_bars_by_timeframe = {
+        "M1": bars_m1_all,
+        "M5": bars_m5_all,
+        "M15": bars_m15_all,
+        "H1": bars_h1_all,
+    }
     for timeframe, bars in (("M1", bars_m1), ("M5", bars_m5), ("M15", bars_m15), ("H1", bars_h1)):
         if len(bars) < minimum_counts[timeframe]:
-            raw_bar_dump = build_raw_bar_dump(bars_m5_all) if timeframe == "M5" else None
+            raw_bars = raw_bars_by_timeframe[timeframe]
+            raw_dump_key = f"{timeframe.lower()}_raw_bar_dump"
+            raw_stats_key = f"{timeframe.lower()}_raw_bar_stats"
             emit_diagnostics(
                 {
                     "stage": "closed_bars_insufficient",
                     "symbol": symbol_name,
+                    "broker_time_utc": cycle_utc.isoformat(),
                     "timeframe": timeframe,
                     "cycle_time_utc": cycle_utc.isoformat(),
                     "requested_bars": requested_counts[timeframe],
                     "returned_bars": raw_counts[timeframe],
                     "closed_bar_count": len(bars),
                     "minimum_closed_bar_count": minimum_counts[timeframe],
-                    "m5_raw_bar_dump": raw_bar_dump,
+                    raw_dump_key: build_raw_bar_dump(raw_bars),
+                    raw_stats_key: build_raw_bar_stats(raw_bars),
                     "payload_health": payload_health.value,
                     "payload_diagnostics": payload_diagnostics,
                 }
@@ -229,6 +257,7 @@ def build_market_snapshot(
         {
             "stage": "snapshot_ready",
             "symbol": symbol_name,
+            "broker_time_utc": cycle_utc.isoformat(),
             "cycle_time_utc": cycle_utc.isoformat(),
             "requested_bars": requested_counts,
             "returned_bars": raw_counts,
