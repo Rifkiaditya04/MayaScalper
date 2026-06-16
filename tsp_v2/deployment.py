@@ -676,7 +676,17 @@ class DeploymentRuntime:
         primary_symbol = self._primary_symbol()
         last_diagnostics: dict[str, Any] | None = None
         while True:
-            broker_time = _ensure_utc(market_adapter.get_broker_time(), field_name="broker_time_utc")
+            broker_time: datetime | None = None
+            try:
+                broker_time = _ensure_utc(market_adapter.get_broker_time(), field_name="broker_time_utc")
+            except MT5BridgeError as exc:
+                self._emit_market_data_probe_telemetry(
+                    store,
+                    market_adapter=market_adapter,
+                    stage="broker_time_probe_failed",
+                    error=exc,
+                )
+                raise
 
             def diagnostics_hook(payload: dict[str, Any]) -> None:
                 nonlocal last_diagnostics
@@ -745,6 +755,15 @@ class DeploymentRuntime:
                     )
                     raise
                 raise
+            except MT5BridgeError as exc:
+                self._emit_market_data_probe_telemetry(
+                    store,
+                    market_adapter=market_adapter,
+                    stage="snapshot_probe_failed",
+                    broker_time=broker_time,
+                    error=exc,
+                )
+                raise
             self._emit_telemetry(
                 store,
                 "deployment.startup_sync",
@@ -775,6 +794,68 @@ class DeploymentRuntime:
 
     def _emit_telemetry(self, store: SQLiteRuntimeStore, topic: str, payload: Mapping[str, Any]) -> None:
         store.store_telemetry_index(topic, payload)
+
+    def _emit_market_data_probe_telemetry(
+        self,
+        store: SQLiteRuntimeStore,
+        *,
+        market_adapter: MT5MarketAdapter,
+        stage: str,
+        broker_time: datetime | None = None,
+        error: MT5BridgeError | None = None,
+    ) -> None:
+        bridge = market_adapter.bridge
+        probe = dict(getattr(bridge, "last_latest_tick_probe", {}) or {})
+        bridge_error_summary: dict[str, Any] | None = None
+        if error is not None:
+            diagnostics = error.status.diagnostics
+            bridge_error_summary = {
+                key: diagnostics[key]
+                for key in (
+                    "symbol",
+                    "timeframe",
+                    "count",
+                    "recovery_connect_path",
+                    "market_data_probe_attempted",
+                    "market_data_usable",
+                    "recovery_fully_usable",
+                    "pre_recovery_last_error",
+                    "post_recovery_last_error",
+                )
+                if key in diagnostics
+            }
+        payload: dict[str, Any] = {
+            "stage": stage,
+            "probe_status": "failed" if error is not None else "success",
+            "symbol": probe.get("symbol", self._primary_symbol()),
+            "broker_time_utc": broker_time.isoformat() if broker_time is not None else probe.get("broker_time_utc"),
+            "symbol_info_tick_result": probe.get("symbol_info_tick_result"),
+            "raw_time_value": probe.get("raw_time_value"),
+            "raw_time_msc_value": probe.get("raw_time_msc_value"),
+            "timestamp_valid": probe.get("timestamp_valid"),
+            "retry_count": probe.get("retry_count"),
+            "tick_time_retry_count": probe.get("tick_time_retry_count"),
+            "tick_time_retry_used": probe.get("tick_time_retry_used"),
+            "stream_used": probe.get("stream_used"),
+            "stream_tick_found": probe.get("stream_tick_found"),
+            "rates_fallback_used": probe.get("rates_fallback_used"),
+            "tick_time_fallback_used": probe.get("tick_time_fallback_used"),
+            "tick_time_fallback_source": probe.get("tick_time_fallback_source"),
+            "final_time_source": probe.get("final_time_source"),
+            "failure_stage": probe.get("failure_stage"),
+            "failure_reason": probe.get("failure_reason"),
+            "bridge_error_message": str(error) if error is not None else None,
+            "latest_tick_probe": probe or None,
+        }
+        if error is not None:
+            payload["bridge_error_failure_class"] = error.status.failure_class
+            payload["bridge_error_response_class"] = error.status.response_class
+            payload["bridge_error_retryable"] = error.status.retryable
+            payload["bridge_error_fatal"] = error.status.fatal
+            if bridge_error_summary:
+                payload["bridge_error_summary"] = bridge_error_summary
+        clean_payload = {key: value for key, value in payload.items() if value is not None}
+        self._emit_telemetry(store, "deployment.market_data_probe", clean_payload)
 
     def _sync_execution_registry_from_store(self, store: SQLiteRuntimeStore) -> None:
         if self.execution_adapter is None or self.execution_adapter.registry is None:

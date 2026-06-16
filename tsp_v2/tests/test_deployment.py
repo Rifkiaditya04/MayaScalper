@@ -703,6 +703,85 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(payload["closed_bar_count"], 0)
             self.assertTrue(payload["rates_none"])
 
+    def test_start_emits_market_data_probe_on_broker_time_failure(self) -> None:
+        class BrokerTimeFailingBridge(FakeLiveBridge):
+            def get_latest_tick(self, symbol: str) -> dict[str, object]:
+                symbol_name = symbol.upper()
+                probe = {
+                    "symbol": symbol_name,
+                    "symbol_info_tick_result": "success",
+                    "raw_time_value": None,
+                    "raw_time_msc_value": None,
+                    "timestamp_valid": False,
+                    "retry_count": 20,
+                    "tick_time_retry_count": 20,
+                    "tick_time_retry_used": True,
+                    "stream_used": True,
+                    "stream_tick_found": False,
+                    "rates_fallback_used": True,
+                    "tick_time_fallback_used": True,
+                    "tick_time_fallback_source": "rates_m1",
+                    "final_time_source": "rates_m1",
+                    "failure_stage": "rates_fallback",
+                    "failure_reason": f"Unable to fetch rates for {symbol_name} M1",
+                }
+                self.last_latest_tick_probe = probe
+                raise MT5BridgeError(
+                    MT5BridgeStatus(
+                        ok=False,
+                        failure_class="CONTRACT_QUERY_FAILURE",
+                        response_class="DEGRADE_SYMBOL",
+                        retryable=False,
+                        fatal=False,
+                        message=f"Unable to fetch rates for {symbol_name} M1",
+                        terminal_ready=True,
+                        broker_ready=True,
+                        diagnostics={
+                            "symbol": symbol_name,
+                            "timeframe": "M1",
+                            "count": 1,
+                            "latest_tick_probe": probe,
+                        },
+                    )
+                )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = _load_config(root, allow_live_execution=True)
+            fake_bridge = BrokerTimeFailingBridge(
+                broker_time_value=datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc),
+            )
+            runtime = DeploymentRuntime(config, bridge=fake_bridge)
+            with self.assertRaises(MT5BridgeError):
+                runtime.start(
+                    dry_run=False,
+                    probe=fake_bridge,
+                    current_time_utc=datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc),
+                    max_cycles=1,
+                )
+            telemetry_db = sqlite3.connect(config.persistence.sqlite_path)
+            telemetry_db.row_factory = sqlite3.Row
+            rows = telemetry_db.execute(
+                """
+                SELECT payload_json
+                FROM telemetry_index
+                WHERE topic = 'deployment.market_data_probe'
+                ORDER BY rowid DESC
+                LIMIT 1
+                """
+            ).fetchall()
+            telemetry_db.close()
+            self.assertTrue(rows)
+            payload = json.loads(rows[0]["payload_json"])
+            self.assertEqual(payload["stage"], "broker_time_probe_failed")
+            self.assertEqual(payload["probe_status"], "failed")
+            self.assertEqual(payload["symbol"], "XAUUSD")
+            self.assertEqual(payload["final_time_source"], "rates_m1")
+            self.assertEqual(payload["tick_time_fallback_source"], "rates_m1")
+            self.assertTrue(payload["rates_fallback_used"])
+            self.assertIn("latest_tick_probe", payload)
+            self.assertEqual(payload["latest_tick_probe"]["failure_stage"], "rates_fallback")
+
     def test_start_blocks_on_fingerprint_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

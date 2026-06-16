@@ -129,6 +129,7 @@ class MT5Bridge:
     market_data_probe_error: dict[str, Any] | None = None
     recovery_fully_usable: bool = False
     _market_data_probe_in_progress: bool = False
+    last_latest_tick_probe: dict[str, Any] | None = None
     last_connect_path: str | None = None
     last_status: MT5BridgeStatus | None = None
 
@@ -481,8 +482,35 @@ class MT5Bridge:
         symbol_name = _require_symbol(symbol)
         self.query_symbol_contract(symbol_name)
         captured_at_utc = datetime.now(tz=timezone.utc)
+        probe: dict[str, Any] = {
+            "symbol": symbol_name,
+            "captured_at_utc": captured_at_utc,
+            "symbol_info_tick_result": None,
+            "timestamp_valid": False,
+            "retry_count": 0,
+            "tick_time_retry_count": 0,
+            "tick_time_retry_used": False,
+            "stream_used": False,
+            "stream_tick_found": False,
+            "rates_fallback_used": False,
+            "tick_time_fallback_used": False,
+            "tick_time_fallback_source": None,
+            "final_time_source": None,
+            "failure_stage": None,
+            "failure_reason": None,
+            "raw_time_value": None,
+            "raw_time_msc_value": None,
+        }
         tick = _record_to_dict(_safe_call(mt5, "symbol_info_tick", symbol_name, default=None))
         if tick is None:
+            probe.update(
+                {
+                    "symbol_info_tick_result": "none",
+                    "failure_stage": "symbol_info_tick",
+                    "failure_reason": f"Unable to fetch latest tick for {symbol_name}",
+                }
+            )
+            self.last_latest_tick_probe = _json_ready(probe)
             raise MT5BridgeError(
                 self._bridge_error_status(
                     mt5,
@@ -490,17 +518,28 @@ class MT5Bridge:
                     response_class=RESPONSE_DEGRADE_SYMBOL,
                     fatal=False,
                     message=f"Unable to fetch latest tick for {symbol_name}",
-                    diagnostics={"symbol": symbol_name},
+                    diagnostics={"symbol": symbol_name, "latest_tick_probe": _json_ready(probe)},
                 )
             )
         tick_time_retry_count = 0
+        probe["symbol_info_tick_result"] = "success"
         while _record_tick_time_value(tick) is None and tick_time_retry_count < 20:
             time.sleep(0.5)
             tick_time_retry_count += 1
             tick = _record_to_dict(_safe_call(mt5, "symbol_info_tick", symbol_name, default=None))
             if tick is None:
                 break
+        probe["retry_count"] = tick_time_retry_count
+        probe["tick_time_retry_count"] = tick_time_retry_count
+        probe["tick_time_retry_used"] = tick_time_retry_count > 0
         if tick is None:
+            probe.update(
+                {
+                    "failure_stage": "symbol_info_tick",
+                    "failure_reason": f"Unable to fetch latest tick for {symbol_name}",
+                }
+            )
+            self.last_latest_tick_probe = _json_ready(probe)
             raise MT5BridgeError(
                 self._bridge_error_status(
                     mt5,
@@ -508,16 +547,49 @@ class MT5Bridge:
                     response_class=RESPONSE_DEGRADE_SYMBOL,
                     fatal=False,
                     message=f"Unable to fetch latest tick for {symbol_name}",
-                    diagnostics={"symbol": symbol_name},
+                    diagnostics={"symbol": symbol_name, "latest_tick_probe": _json_ready(probe)},
                 )
             )
         if _record_tick_time_value(tick) is None:
+            probe["stream_used"] = True
             stream_tick = self._get_latest_tick_from_stream(mt5, symbol_name, captured_at_utc)
             if stream_tick is not None:
                 tick = stream_tick
+                probe["stream_tick_found"] = True
+                probe["tick_time_fallback_used"] = True
+                probe["tick_time_fallback_source"] = "ticks_stream"
+                probe["final_time_source"] = "ticks_stream"
             else:
-                fallback_rates = self.get_rates(symbol_name, "M1", 1)
+                probe["stream_tick_found"] = False
+                probe["rates_fallback_used"] = True
+                probe["tick_time_fallback_used"] = True
+                probe["tick_time_fallback_source"] = "rates_m1"
+                probe["final_time_source"] = "rates_m1"
+                try:
+                    fallback_rates = self.get_rates(symbol_name, "M1", 1)
+                except MT5BridgeError as exc:
+                    probe.update(
+                        {
+                            "failure_stage": "rates_fallback",
+                            "failure_reason": exc.status.message,
+                            "rates_error_message": exc.status.message,
+                            "rates_error_failure_class": exc.status.failure_class,
+                            "rates_error_response_class": exc.status.response_class,
+                            "rates_error_retryable": exc.status.retryable,
+                            "rates_error_fatal": exc.status.fatal,
+                        }
+                    )
+                    self.last_latest_tick_probe = _json_ready(probe)
+                    exc.status.diagnostics.setdefault("latest_tick_probe", _json_ready(probe))
+                    raise
                 if not fallback_rates:
+                    probe.update(
+                        {
+                            "failure_stage": "rates_fallback",
+                            "failure_reason": f"Unable to resolve latest tick timestamp for {symbol_name}",
+                        }
+                    )
+                    self.last_latest_tick_probe = _json_ready(probe)
                     raise MT5BridgeError(
                         self._bridge_error_status(
                             mt5,
@@ -525,7 +597,7 @@ class MT5Bridge:
                             response_class=RESPONSE_DEGRADE_SYMBOL,
                             fatal=False,
                             message=f"Unable to resolve latest tick timestamp for {symbol_name}",
-                            diagnostics={"symbol": symbol_name, "fallback": "rates_m1"},
+                            diagnostics={"symbol": symbol_name, "fallback": "rates_m1", "latest_tick_probe": _json_ready(probe)},
                         )
                     )
                 tick = dict(tick)
@@ -533,10 +605,23 @@ class MT5Bridge:
                 tick["time"] = fallback_timestamp
                 tick["time_msc"] = int(fallback_timestamp.timestamp() * 1000)
                 tick["source_time_fallback"] = "rates_m1"
-        elif tick_time_retry_count > 0:
-            tick = dict(tick)
-            tick["tick_time_retry_count"] = tick_time_retry_count
-        return _normalize_tick_record(tick, symbol_name, captured_at_utc=captured_at_utc)
+        else:
+            probe["final_time_source"] = "symbol_info_tick"
+            if tick_time_retry_count > 0:
+                tick = dict(tick)
+                tick["tick_time_retry_count"] = tick_time_retry_count
+        raw_time = _record_tick_time_value(tick)
+        probe["raw_time_value"] = _json_ready(raw_time)
+        probe["raw_time_msc_value"] = _json_ready(tick.get("time_msc"))
+        probe["timestamp_valid"] = raw_time is not None
+        if probe["final_time_source"] is None:
+            probe["final_time_source"] = "symbol_info_tick"
+        normalized = _normalize_tick_record(tick, symbol_name, captured_at_utc=captured_at_utc)
+        probe["broker_time_utc"] = normalized["timestamp"]
+        probe["normalized_timestamp"] = normalized["timestamp"]
+        probe["normalized_tzinfo"] = str(normalized["timestamp"].tzinfo)
+        self.last_latest_tick_probe = _json_ready(probe)
+        return normalized
 
     def latest_tick_audit(self, symbol: str) -> dict[str, Any]:
         return self.get_latest_tick_audit(symbol)
@@ -605,6 +690,51 @@ class MT5Bridge:
             "broker_time_offset_hours": normalized["broker_time_offset_hours"],
             "broker_time_offset_seconds": normalized["broker_time_offset_seconds"],
             "broker_time_utc": normalized["timestamp"],
+            "normalized_timestamp": normalized["timestamp"],
+            "normalized_tzinfo": str(normalized["timestamp"].tzinfo),
+            "normalized_time": normalized["time"],
+            "captured_at_utc": captured_at_utc,
+            "broker_delta_seconds_from_capture": normalized["broker_delta_seconds_from_capture"],
+            "delta_seconds_from_capture": (normalized["timestamp"] - captured_at_utc).total_seconds(),
+            "normalized_tick": _json_ready(normalized),
+        }
+        self.last_latest_tick_probe = _json_ready(
+            {
+                "symbol": symbol_name,
+                "captured_at_utc": captured_at_utc,
+                "symbol_info_tick_result": "success" if raw_tick_dict is not None else "none",
+                "tick_time_retry_count": tick_time_retry_count,
+                "tick_time_retry_used": tick_time_retry_count > 0,
+                "tick_time_fallback_used": raw_tick_dict.get("source_time_fallback") is not None,
+                "tick_time_fallback_source": raw_tick_dict.get("source_time_fallback"),
+                "stream_used": raw_tick_dict.get("source_time_fallback") == "ticks_stream",
+                "stream_tick_found": raw_tick_dict.get("source_time_fallback") == "ticks_stream",
+                "rates_fallback_used": raw_tick_dict.get("source_time_fallback") == "rates_m1",
+                "final_time_source": raw_tick_dict.get("source_time_fallback") or "symbol_info_tick",
+                "raw_time_value": _json_ready(raw_time),
+                "raw_time_msc_value": _json_ready(raw_time_msc),
+                "broker_time_utc": normalized["timestamp"],
+                "normalized_timestamp": normalized["timestamp"],
+                "normalized_tzinfo": str(normalized["timestamp"].tzinfo),
+            }
+        )
+        return {
+            "symbol": symbol_name,
+            "raw_tick_type": type(raw_tick).__name__,
+            "raw_tick_repr": repr(raw_tick),
+            "raw_time_type": type(raw_time).__name__ if raw_time is not None else None,
+            "raw_time_value": _json_ready(raw_time),
+            "raw_time_msc_type": type(raw_time_msc).__name__ if raw_time_msc is not None else None,
+            "raw_time_msc_value": _json_ready(raw_time_msc),
+            "tick_time_fallback_used": raw_tick_dict.get("source_time_fallback") is not None,
+            "tick_time_fallback_source": raw_tick_dict.get("source_time_fallback"),
+            "tick_time_retry_count": tick_time_retry_count,
+            "tick_time_retry_used": tick_time_retry_count > 0,
+            "source_timestamp_utc_assumption": normalized["source_timestamp_utc_assumption"],
+            "source_delta_seconds_from_capture": normalized["source_delta_seconds_from_capture"],
+            "broker_time_offset_hours": normalized["broker_time_offset_hours"],
+            "broker_time_offset_seconds": normalized["broker_time_offset_seconds"],
+            "broker_time_utc": normalized["broker_time_utc"],
             "normalized_timestamp": normalized["timestamp"],
             "normalized_tzinfo": str(normalized["timestamp"].tzinfo),
             "normalized_time": normalized["time"],
@@ -1103,6 +1233,7 @@ class MT5Bridge:
         self.market_data_probe_error = None
         self.recovery_fully_usable = False
         self._market_data_probe_in_progress = False
+        self.last_latest_tick_probe = None
         self.last_connect_path = None
 
     def _shutdown_module(self, mt5: Any) -> None:
