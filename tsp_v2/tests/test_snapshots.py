@@ -139,6 +139,34 @@ class ThinMarketProvider(FakeMarketProvider):
         return rates
 
 
+class M5OpenBarProvider(FakeMarketProvider):
+    def get_rates(self, symbol: str, timeframe: str, count: int) -> list[dict[str, object]]:
+        del symbol
+        step = {"M1": 1, "M5": 5, "M15": 15, "H1": 60}[timeframe]
+        if timeframe == "M5":
+            last_time = self._tick_time
+        else:
+            last_time = self._tick_time - timedelta(minutes=step)
+        start = last_time - timedelta(minutes=step * (count - 1))
+        bars: list[dict[str, object]] = []
+        current = start
+        for idx in range(count):
+            open_price = 2300.0 + idx * 0.5
+            close_price = open_price + 0.2
+            bars.append(
+                {
+                    "time": current,
+                    "open": open_price,
+                    "high": close_price + 0.3,
+                    "low": open_price - 0.3,
+                    "close": close_price,
+                    "tick_volume": 100 + idx,
+                }
+            )
+            current += timedelta(minutes=step)
+        return bars
+
+
 class SnapshotTests(unittest.TestCase):
     def setUp(self) -> None:
         self._saved_env = os.environ.copy()
@@ -264,6 +292,35 @@ class SnapshotTests(unittest.TestCase):
                     cycle_time_utc=cycle_time,
                     build_config=SnapshotBuildConfig(m5_bars=71),
                 )
+
+    def test_snapshot_emits_m5_raw_bar_dump_when_m5_closed_bars_are_insufficient(self) -> None:
+        cycle_time = datetime(2026, 5, 26, 13, 10, 0, tzinfo=timezone.utc)
+        provider = M5OpenBarProvider(
+            tick_time=cycle_time,
+            m1_last_time=cycle_time - timedelta(minutes=1),
+        )
+        diagnostics: list[dict[str, object]] = []
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = self._load_config(Path(tmp_dir))
+            with self.assertRaises(ConfigValidationError):
+                build_market_snapshot(
+                    provider,
+                    config=config,
+                    symbol="XAUUSD",
+                    cycle_time_utc=cycle_time,
+                    diagnostics_hook=diagnostics.append,
+                )
+        self.assertTrue(diagnostics)
+        payload = diagnostics[-1]
+        self.assertEqual(payload["stage"], "closed_bars_insufficient")
+        self.assertEqual(payload["timeframe"], "M5")
+        self.assertEqual(payload["requested_bars"], 70)
+        self.assertEqual(payload["returned_bars"], 70)
+        self.assertEqual(payload["closed_bar_count"], 69)
+        self.assertEqual(len(payload["m5_raw_bar_dump"]), 70)
+        self.assertTrue(payload["m5_raw_bar_dump"][0]["closed"])
+        self.assertFalse(payload["m5_raw_bar_dump"][-1]["closed"])
+        self.assertEqual(payload["m5_raw_bar_dump"][-1]["close_time_utc"], "2026-05-26T13:15:00+00:00")
 
     def test_snapshot_rejects_unsupported_symbol(self) -> None:
         cycle_time = datetime(2026, 5, 26, 13, 10, 0, tzinfo=timezone.utc)

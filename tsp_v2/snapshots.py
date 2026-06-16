@@ -74,6 +74,17 @@ def build_market_snapshot(
         if diagnostics_hook is not None:
             diagnostics_hook(payload)
 
+    def build_raw_bar_dump(bars: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {
+                "index": index,
+                "timestamp": bar["timestamp"].isoformat(),
+                "close_time_utc": bar["close_time_utc"].isoformat(),
+                "closed": bar["close_time_utc"] <= cycle_utc,
+            }
+            for index, bar in enumerate(bars)
+        ]
+
     def fetch_rates(timeframe: str, count: int) -> Sequence[Any]:
         try:
             return provider.get_rates(symbol, timeframe, count)
@@ -158,6 +169,7 @@ def build_market_snapshot(
     }
     for timeframe, bars in (("M1", bars_m1), ("M5", bars_m5), ("M15", bars_m15), ("H1", bars_h1)):
         if len(bars) < minimum_counts[timeframe]:
+            raw_bar_dump = build_raw_bar_dump(bars_m5_all) if timeframe == "M5" else None
             emit_diagnostics(
                 {
                     "stage": "closed_bars_insufficient",
@@ -168,6 +180,7 @@ def build_market_snapshot(
                     "returned_bars": raw_counts[timeframe],
                     "closed_bar_count": len(bars),
                     "minimum_closed_bar_count": minimum_counts[timeframe],
+                    "m5_raw_bar_dump": raw_bar_dump,
                     "payload_health": payload_health.value,
                     "payload_diagnostics": payload_diagnostics,
                 }
