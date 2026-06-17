@@ -349,6 +349,14 @@ class SnapshotTests(unittest.TestCase):
         self.assertTrue(payload["m5_raw_bar_dump"][0]["closed"])
         self.assertFalse(payload["m5_raw_bar_dump"][-1]["closed"])
         self.assertEqual(payload["m5_raw_bar_dump"][-1]["close_time_utc"], "2026-05-26T13:15:00+00:00")
+        self.assertEqual(payload["m5_time_context"]["broker_time_utc"], cycle_time.isoformat())
+        self.assertEqual(payload["m5_time_context"]["latest_tick_timestamp_utc"], cycle_time.isoformat())
+        self.assertEqual(payload["m5_time_context"]["m5_latest_raw_open_time_utc"], "2026-05-26T13:10:00+00:00")
+        self.assertEqual(payload["m5_time_context"]["m5_latest_raw_close_time_utc"], "2026-05-26T13:15:00+00:00")
+        self.assertEqual(payload["m5_time_context"]["m5_latest_closed_bar_close_time_utc"], "2026-05-26T13:10:00+00:00")
+        self.assertEqual(payload["m5_time_context"]["broker_time_minus_latest_tick_seconds"], 0.0)
+        self.assertEqual(payload["m5_time_context"]["broker_time_minus_latest_raw_bar_seconds"], -300.0)
+        self.assertEqual(payload["m5_time_context"]["broker_time_minus_latest_closed_bar_seconds"], 0.0)
 
     def test_snapshot_emits_m1_raw_bar_dump_with_stats_when_m1_closed_bars_are_insufficient(self) -> None:
         cycle_time = datetime(2026, 5, 26, 13, 10, 0, tzinfo=timezone.utc)
@@ -382,6 +390,14 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(len(payload["m1_raw_bar_dump"]), 34)
         self.assertTrue(payload["m1_raw_bar_dump"][0]["closed"])
         self.assertFalse(payload["m1_raw_bar_dump"][-1]["closed"])
+        self.assertEqual(payload["m1_time_context"]["broker_time_utc"], cycle_time.isoformat())
+        self.assertEqual(payload["m1_time_context"]["latest_tick_timestamp_utc"], cycle_time.isoformat())
+        self.assertEqual(payload["m1_time_context"]["m1_latest_raw_open_time_utc"], "2026-05-26T13:12:00+00:00")
+        self.assertEqual(payload["m1_time_context"]["m1_latest_raw_close_time_utc"], "2026-05-26T13:13:00+00:00")
+        self.assertEqual(payload["m1_time_context"]["m1_latest_closed_bar_close_time_utc"], "2026-05-26T13:10:00+00:00")
+        self.assertEqual(payload["m1_time_context"]["broker_time_minus_latest_tick_seconds"], 0.0)
+        self.assertEqual(payload["m1_time_context"]["broker_time_minus_latest_raw_bar_seconds"], -180.0)
+        self.assertEqual(payload["m1_time_context"]["broker_time_minus_latest_closed_bar_seconds"], 0.0)
 
     def test_snapshot_rejects_unsupported_symbol(self) -> None:
         cycle_time = datetime(2026, 5, 26, 13, 10, 0, tzinfo=timezone.utc)

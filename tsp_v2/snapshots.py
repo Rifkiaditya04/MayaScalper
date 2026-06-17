@@ -103,6 +103,32 @@ def build_market_snapshot(
             "latest_close_time_utc": max(close_times).isoformat() if close_times else None,
         }
 
+    def build_time_context(
+        *,
+        timeframe: str,
+        raw_bars: Sequence[dict[str, Any]],
+        closed_bars: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
+        timeframe_key = timeframe.lower()
+        latest_raw_bar = max(raw_bars, key=lambda bar: bar["close_time_utc"])
+        latest_closed_bar = max(closed_bars, key=lambda bar: bar["close_time_utc"]) if closed_bars else None
+        latest_tick_timestamp = tick["timestamp"]
+        context: dict[str, Any] = {
+            "broker_time_utc": cycle_utc.isoformat(),
+            "latest_tick_timestamp_utc": latest_tick_timestamp.isoformat(),
+            f"{timeframe_key}_latest_raw_open_time_utc": latest_raw_bar["timestamp"].isoformat(),
+            f"{timeframe_key}_latest_raw_close_time_utc": latest_raw_bar["close_time_utc"].isoformat(),
+            f"{timeframe_key}_latest_closed_bar_close_time_utc": (
+                latest_closed_bar["close_time_utc"].isoformat() if latest_closed_bar is not None else None
+            ),
+            "broker_time_minus_latest_tick_seconds": (cycle_utc - latest_tick_timestamp).total_seconds(),
+            "broker_time_minus_latest_raw_bar_seconds": (cycle_utc - latest_raw_bar["close_time_utc"]).total_seconds(),
+            "broker_time_minus_latest_closed_bar_seconds": (
+                (cycle_utc - latest_closed_bar["close_time_utc"]).total_seconds() if latest_closed_bar is not None else None
+            ),
+        }
+        return context
+
     def fetch_rates(timeframe: str, count: int) -> Sequence[Any]:
         try:
             return provider.get_rates(symbol, timeframe, count)
@@ -198,6 +224,7 @@ def build_market_snapshot(
             raw_bars = raw_bars_by_timeframe[timeframe]
             raw_dump_key = f"{timeframe.lower()}_raw_bar_dump"
             raw_stats_key = f"{timeframe.lower()}_raw_bar_stats"
+            time_context_key = f"{timeframe.lower()}_time_context"
             emit_diagnostics(
                 {
                     "stage": "closed_bars_insufficient",
@@ -211,6 +238,11 @@ def build_market_snapshot(
                     "minimum_closed_bar_count": minimum_counts[timeframe],
                     raw_dump_key: build_raw_bar_dump(raw_bars),
                     raw_stats_key: build_raw_bar_stats(raw_bars),
+                    time_context_key: build_time_context(
+                        timeframe=timeframe,
+                        raw_bars=raw_bars,
+                        closed_bars=bars,
+                    ),
                     "payload_health": payload_health.value,
                     "payload_diagnostics": payload_diagnostics,
                 }
