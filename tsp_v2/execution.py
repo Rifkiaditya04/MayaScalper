@@ -98,7 +98,11 @@ TRANSITION_ALLOWED: dict[ExecutionRegistryState, frozenset[ExecutionRegistryStat
     ExecutionRegistryState.REJECTED: frozenset(),
     ExecutionRegistryState.CANCELLED: frozenset(),
     ExecutionRegistryState.EXPIRED: frozenset(),
-    ExecutionRegistryState.AMBIGUOUS: frozenset(),
+    ExecutionRegistryState.AMBIGUOUS: frozenset(
+        {
+            ExecutionRegistryState.EXPIRED,
+        }
+    ),
 }
 
 

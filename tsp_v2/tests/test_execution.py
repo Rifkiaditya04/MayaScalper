@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import unittest
 
+from tsp_v2.config_schema import ConfigValidationError
 from tsp_v2.enums import (
     Direction,
     ExecutionRegistryState,
@@ -83,6 +84,45 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(acknowledged.state, ExecutionRegistryState.ACKNOWLEDGED)
         self.assertEqual(filled.state, ExecutionRegistryState.FILLED)
 
+    def test_ambiguous_can_transition_to_expired(self) -> None:
+        snapshot = _snapshot()
+        signal = _signal(snapshot, SignalFamily.TREND_CONTINUATION)
+        risk = _risk(snapshot)
+        intent = build_execution_intent(signal, risk, decision_price=100.1, cycle_time_utc=snapshot.cycle_time_utc)
+        registry = ExecutionRegistryBook()
+        reserved = registry.reserve(intent, at_utc=snapshot.cycle_time_utc)
+        ambiguous = registry.mark_ambiguous(
+            reserved.submission_uuid,
+            at_utc=snapshot.cycle_time_utc + timedelta(seconds=1),
+            broker_ticket=333,
+        )
+        expired = registry.mark_expired(
+            ambiguous.submission_uuid,
+            at_utc=snapshot.cycle_time_utc + timedelta(seconds=120),
+            broker_ticket=333,
+        )
+        self.assertEqual(ambiguous.state, ExecutionRegistryState.AMBIGUOUS)
+        self.assertEqual(expired.state, ExecutionRegistryState.EXPIRED)
+
+    def test_mark_expired_rejects_filled_entry(self) -> None:
+        snapshot = _snapshot()
+        signal = _signal(snapshot, SignalFamily.TREND_CONTINUATION)
+        risk = _risk(snapshot)
+        intent = build_execution_intent(signal, risk, decision_price=100.1, cycle_time_utc=snapshot.cycle_time_utc)
+        registry = ExecutionRegistryBook()
+        reserved = registry.reserve(intent, at_utc=snapshot.cycle_time_utc)
+        filled = registry.mark_filled(
+            reserved.submission_uuid,
+            at_utc=snapshot.cycle_time_utc + timedelta(seconds=1),
+            broker_ticket=444,
+        )
+        with self.assertRaises(ConfigValidationError):
+            registry.mark_expired(
+                filled.submission_uuid,
+                at_utc=snapshot.cycle_time_utc + timedelta(seconds=120),
+                broker_ticket=444,
+            )
+
     def test_retryable_failure_mapping(self) -> None:
         disposition = classify_broker_response({"retcode": "TRADE_CONTEXT_BUSY", "ticket": 11})
         self.assertTrue(disposition.retryable)
@@ -106,6 +146,31 @@ class ExecutionTests(unittest.TestCase):
             at_utc=snapshot.cycle_time_utc + timedelta(seconds=10),
         )
         self.assertEqual(reconciled[0].state, ExecutionRegistryState.FILLED)
+
+    def test_broker_truth_reconciliation_expires_ambiguous_entries_idempotently(self) -> None:
+        snapshot = _snapshot()
+        signal = _signal(snapshot, SignalFamily.TREND_CONTINUATION)
+        risk = _risk(snapshot)
+        registry = ExecutionRegistryBook()
+        intent = build_execution_intent(signal, risk, decision_price=100.1, cycle_time_utc=snapshot.cycle_time_utc)
+        registry.reserve(intent, at_utc=snapshot.cycle_time_utc)
+        registry.mark_ambiguous(
+            intent.submission_uuid,
+            at_utc=snapshot.cycle_time_utc + timedelta(seconds=1),
+            broker_ticket=555,
+        )
+        first = reconcile_registry_against_broker_truth(
+            registry,
+            (),
+            at_utc=snapshot.cycle_time_utc + timedelta(seconds=120),
+        )
+        second = reconcile_registry_against_broker_truth(
+            registry,
+            (),
+            at_utc=snapshot.cycle_time_utc + timedelta(seconds=180),
+        )
+        self.assertEqual(first[0].state, ExecutionRegistryState.EXPIRED)
+        self.assertEqual(second[0].state, ExecutionRegistryState.EXPIRED)
 
     def test_symbol_lock_blocks_duplicate_until_expiry(self) -> None:
         snapshot = _snapshot()
