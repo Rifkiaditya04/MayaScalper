@@ -18,6 +18,7 @@ from tsp_v2.deployment import DeploymentRuntime, SingleInstanceLock
 from tsp_v2.enums import ClockHealth, Direction, GovernorState, HealthState, PaceClassification
 from tsp_v2.live_runtime import LiveCycleReport, LiveRuntimeRunner
 from tsp_v2.persistence import SQLiteRuntimeStore
+from tsp_v2.models import ExecutionResult
 
 
 BASE_TEMPLATE = """
@@ -640,6 +641,95 @@ class DeploymentTests(unittest.TestCase):
                 self.assertEqual(runtime_report.cycles_completed, 1)
                 self.assertIsNotNone(runtime_report.last_cycle)
                 self.assertEqual(runtime_report.last_cycle, report)
+            finally:
+                store.close()
+
+    def test_emit_execution_telemetry_persists_request_response_and_last_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = _load_config(root, allow_live_execution=True)
+            store = SQLiteRuntimeStore(config.persistence.sqlite_path)
+            store.initialize()
+            store.set_config_fingerprint(config.fingerprint)
+            try:
+                runner = LiveRuntimeRunner(
+                    config=config,
+                    store=store,
+                    bridge=SimpleNamespace(),
+                    market_adapter=SimpleNamespace(),
+                    execution_adapter=SimpleNamespace(
+                        registry=SimpleNamespace(entries_by_setup_id={}, entries_by_submission_uuid={})
+                    ),
+                    bootstrap_report=SimpleNamespace(ready_to_resume=True),
+                )
+                result = ExecutionResult(
+                    accepted=False,
+                    rejected=True,
+                    filled=False,
+                    partial_fill=False,
+                    ticket=None,
+                    broker_code="API_HUNG",
+                    classification="ESCALATE_KILL_REVIEW",
+                    retryable=False,
+                    fatal=True,
+                    terminal=False,
+                    message="order_send returned None | last_error=-2:Unnamed arguments not allowed",
+                    submission_uuid="submission-1",
+                    setup_id="setup-1",
+                    symbol="GBPUSD",
+                    request={
+                        "action": "TRADE_ACTION_DEAL",
+                        "symbol": "GBPUSD",
+                        "volume": 0.1,
+                        "type": "BUY",
+                        "price": 1.32265,
+                        "deviation": 20,
+                        "comment": "TSP_V2|setup-1|submission-1",
+                        "type_time": "ORDER_TIME_GTC",
+                        "type_filling": "ORDER_FILLING_RETURN",
+                    },
+                    response={},
+                    diagnostics={
+                        "bridge": {
+                            "ok": False,
+                            "failure_class": "API_HUNG",
+                            "response_class": "ESCALATE_KILL_REVIEW",
+                            "retryable": False,
+                            "fatal": True,
+                            "message": "order_send returned None | last_error=-2:Unnamed arguments not allowed",
+                            "terminal": False,
+                            "broker_ready": True,
+                            "terminal_ready": True,
+                            "diagnostics": {
+                                "request": {"symbol": "GBPUSD"},
+                                "response": {},
+                                "last_error": {"code": -2, "message": "Unnamed arguments not allowed"},
+                            },
+                        },
+                        "disposition": {},
+                    },
+                    registry_state=None,
+                )
+                runner._emit_execution_telemetry(result, datetime(2026, 5, 29, 9, 10, 0, tzinfo=timezone.utc))
+
+                telemetry_db = sqlite3.connect(config.persistence.sqlite_path)
+                telemetry_db.row_factory = sqlite3.Row
+                rows = telemetry_db.execute(
+                    """
+                    SELECT payload_json
+                    FROM telemetry_index
+                    WHERE topic = 'execution_rejected'
+                    ORDER BY rowid DESC
+                    LIMIT 1
+                    """
+                ).fetchall()
+                telemetry_db.close()
+                self.assertTrue(rows)
+                payload = json.loads(rows[0]["payload_json"])
+                self.assertEqual(payload["request"]["symbol"], "GBPUSD")
+                self.assertEqual(payload["response"], {})
+                self.assertEqual(payload["bridge_diagnostics"]["last_error"]["code"], -2)
+                self.assertEqual(payload["last_error"]["message"], "Unnamed arguments not allowed")
             finally:
                 store.close()
 

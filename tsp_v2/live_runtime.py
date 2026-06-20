@@ -508,6 +508,9 @@ class LiveRuntimeRunner:
             kind = "filled"
         elif result.rejected:
             kind = "rejected"
+        bridge_diagnostics = dict((result.diagnostics or {}).get("bridge", {}).get("diagnostics", {}) or {})
+        bridge_payload = dict((result.diagnostics or {}).get("bridge", {}) or {})
+        last_error = bridge_diagnostics.get("last_error")
         self.store.store_execution_event(
             submission_uuid=result.submission_uuid,
             event_type=kind,
@@ -525,6 +528,11 @@ class LiveRuntimeRunner:
                 "terminal": result.terminal,
                 "message": result.message,
                 "event_time_utc": when.isoformat(),
+                "request": result.request,
+                "response": result.response,
+                "bridge_diagnostics": bridge_diagnostics,
+                "bridge_status": bridge_payload,
+                "last_error": last_error,
             },
         )
         self._emit_telemetry(
@@ -541,6 +549,11 @@ class LiveRuntimeRunner:
                 "rejected": result.rejected,
                 "filled": result.filled,
                 "partial_fill": result.partial_fill,
+                "request": result.request,
+                "response": result.response,
+                "bridge_diagnostics": bridge_diagnostics,
+                "bridge_status": bridge_payload,
+                "last_error": last_error,
             },
         )
 
