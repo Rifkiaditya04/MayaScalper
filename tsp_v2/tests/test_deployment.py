@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -352,6 +353,32 @@ class DeploymentTests(unittest.TestCase):
             with self.assertRaises(ConfigValidationError):
                 second.acquire(owner="second", now_utc=datetime(2026, 5, 29, 9, 0, 1, tzinfo=timezone.utc))
             first.release()
+
+    def test_process_is_alive_returns_true_for_current_pid(self) -> None:
+        self.assertTrue(deployment_module._process_is_alive(os.getpid()))
+
+    def test_process_is_alive_returns_false_for_non_positive_pid(self) -> None:
+        self.assertFalse(deployment_module._process_is_alive(0))
+        self.assertFalse(deployment_module._process_is_alive(-1))
+
+    @unittest.skipUnless(os.name == "nt", "Windows-specific probe")
+    def test_process_is_alive_maps_windows_liveness_probe_oserror_to_false(self) -> None:
+        with patch.object(
+            deployment_module,
+            "_windows_process_is_alive",
+            side_effect=OSError(87, "The parameter is incorrect"),
+        ):
+            self.assertFalse(deployment_module._process_is_alive(12345))
+
+    @unittest.skipUnless(os.name == "nt", "Windows-specific probe")
+    def test_process_is_alive_propagates_fatal_windows_probe_error(self) -> None:
+        with patch.object(
+            deployment_module,
+            "_windows_process_is_alive",
+            side_effect=RuntimeError("boom"),
+        ):
+            with self.assertRaises(RuntimeError):
+                deployment_module._process_is_alive(12345)
 
     def test_preflight_reclaims_stale_lock(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

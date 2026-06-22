@@ -1004,6 +1004,11 @@ def _process_is_alive(pid: int) -> bool:
         return False
     if pid == os.getpid():
         return True
+    if os.name == "nt":
+        try:
+            return _windows_process_is_alive(pid)
+        except OSError:
+            return False
     try:
         os.kill(pid, 0)
     except PermissionError:
@@ -1011,6 +1016,50 @@ def _process_is_alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+def _windows_process_is_alive(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    open_process = kernel32.OpenProcess
+    open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    open_process.restype = wintypes.HANDLE
+
+    get_exit_code_process = kernel32.GetExitCodeProcess
+    get_exit_code_process.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    get_exit_code_process.restype = wintypes.BOOL
+
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = [wintypes.HANDLE]
+    close_handle.restype = wintypes.BOOL
+
+    handle = open_process(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        error = ctypes.get_last_error()
+        if error in {0, 2, 3, 6, 87}:
+            return False
+        if error == 5:
+            return True
+        raise OSError(error, os.strerror(error))
+
+    try:
+        exit_code = wintypes.DWORD()
+        if not get_exit_code_process(handle, ctypes.byref(exit_code)):
+            error = ctypes.get_last_error()
+            if error in {0, 2, 3, 6, 87}:
+                return False
+            if error == 5:
+                return True
+            raise OSError(error, os.strerror(error))
+        return exit_code.value == STILL_ACTIVE
+    finally:
+        close_handle(handle)
 
 
 def _ensure_utc(value: datetime, *, field_name: str) -> datetime:
