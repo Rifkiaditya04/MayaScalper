@@ -213,6 +213,86 @@ Raw dump reference:
 
 ---
 
+### M1-20260624-001
+
+- Runtime date (UTC): `2026-06-24`
+- Run type: forward test
+- Build / repo commit: `43af549`
+- Profile: `FORWARD_SAFE`
+- Broker: `InstaForex-Server`
+- Symbol: `GBPJPY`
+- Telemetry event: `deployment.market_data_readiness`
+- Event id: `1364`
+- Stage: `closed_bars_insufficient`
+- Reason: `Not enough closed bars for timeframe M1: need at least 34`
+
+Snapshot:
+
+- `requested_bars = 40`
+- `returned_bars = 40`
+- `minimum_closed_bar_count = 34`
+- `closed_bar_count = 29`
+- `forming_count = 1`
+- `future_count = 10`
+- `duplicate_close_time_count = 0`
+- `payload_health = GREEN`
+
+Time context:
+
+- `broker_time_utc = 2026-06-24T03:45:23+00:00`
+- `latest_tick_timestamp_utc = 2026-06-24T03:46:51+00:00`
+- `latest_raw_open_time_utc = 2026-06-24T03:55:00+00:00`
+- `latest_raw_close_time_utc = 2026-06-24T03:56:00+00:00`
+- `latest_closed_bar_close_time_utc = 2026-06-24T03:45:00+00:00`
+- `delta_tick_to_broker_seconds = -88.0`
+- `delta_raw_close_to_broker_seconds = -637.0`
+- `delta_closed_close_to_broker_seconds = 23.0`
+
+Raw window summary:
+
+- `requested_raw = 40`
+- `returned_raw = 40`
+- `oldest_raw_open = 2026-06-24T03:16:00+00:00`
+- `newest_raw_open = 2026-06-24T03:55:00+00:00`
+- `oldest_raw_close = 2026-06-24T03:17:00+00:00`
+- `newest_raw_close = 2026-06-24T03:56:00+00:00`
+
+Runtime:
+
+- `startup_sync_completed = true`
+- `runtime_started = true`
+- `cycle_number = 0`
+- `last_processed_m5_close_utc = n/a`
+- `closed_m5_gate = n/a`
+
+Feed context:
+
+- `symbol_info_tick_result = unknown`
+- `retry_count = unknown`
+- `stream_used = unknown`
+- `stream_tick_found = unknown`
+- `rates_fallback_used = unknown`
+- `tick_time_fallback_source = unknown`
+- `final_time_source = unknown`
+
+Observation:
+
+- Forward validation started normally and then failed before the first runtime cycle because M1 closed-bar readiness remained insufficient.
+- The sample is consistent with prior M1 characterization samples but does not yet justify a contract change.
+
+Initial classification:
+
+- [ ] Timing
+- [ ] MT5 bridge
+- [ ] Race condition
+- [x] Unknown
+
+Raw dump reference:
+
+- `telemetry_index.id = 1364`
+
+---
+
 ## Lampiran Raw Dump
 
 Simpan dump lengkap `m1_raw_bar_dump` sebagai file terpisah dengan nama yang konsisten, misalnya:
