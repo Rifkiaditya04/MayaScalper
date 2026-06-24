@@ -1,5 +1,16 @@
 # Contest Readiness Checklist
 
+## Metadata
+
+| Field | Value |
+| --- | --- |
+| Checklist Version | 1.1 |
+| Last Updated | 2026-06-24 |
+| Baseline Commit | `187e1fa` |
+| Blueprint Version | `FINAL_BLUEPRINT V2.md` |
+| Validation Program Version | `docs/VALIDATION_PROGRAM_V2.md` |
+| Current Verdict | `NO` |
+
 ## Purpose
 
 Dokumen ini menjawab satu pertanyaan operasional:
@@ -27,6 +38,16 @@ Status yang dipakai:
 - `FAIL`
 - `IN PROGRESS`
 - `EVIDENCE COLLECTED`
+- `VERIFIED`
+- `NOT YET VERIFIED`
+
+Makna status:
+
+- `EVIDENCE COLLECTED` = evidence mentah sudah ada, tetapi belum cukup untuk gate final.
+- `VERIFIED` = evidence sudah direview dan cukup kuat untuk dinyatakan valid pada level checklist, tetapi belum tentu berarti seluruh program lulus.
+- `PASS` = item lolos gate final pada area tersebut.
+- `IN PROGRESS` = item masih berjalan dan belum bisa disimpulkan.
+- `NOT YET VERIFIED` = item belum punya evidence yang cukup.
 
 Checklist ini tidak menetapkan target performa arbitrer jika blueprint atau aturan kompetisi tidak menyediakannya.
 
@@ -56,7 +77,7 @@ Checklist ini tidak menetapkan target performa arbitrer jika blueprint atau atur
 | Startup synchronization stabil | PASS | B3 forward validation, telemetry `deployment.startup_sync` | Startup sync sudah tervalidasi |
 | Closed-M5 gate stabil | PASS | B4 forward validation, telemetry `deployment.closed_m5_gate` | Satu closed M5 memicu satu cycle |
 | Lock reclaim stabil | PASS | WL2 contract + forward validation | Single-instance reclaim Windows sudah tervalidasi |
-| Runtime loop deterministik dalam observasi saat ini | PASS | FT7, no-regression 5-run observation | Observed behavior konsisten dengan blueprint |
+| Runtime loop deterministik dalam observasi saat ini | VERIFIED | FT7, no-regression 5-run observation | Observed behavior konsisten dengan blueprint |
 | Recovery rehearsal berhasil | EVIDENCE COLLECTED | WL2, recovery telemetry, reconciliation telemetry | Ada evidence recovery, tetapi belum seluruh skenario operasional jangka panjang |
 | MT5 restart recovery | IN PROGRESS | recovery docs, runtime telemetry | Butuh observasi tambahan untuk klaim penuh |
 | Network interruption recovery | NOT YET VERIFIED | — | Belum ada evidence spesifik yang cukup |
@@ -69,13 +90,13 @@ Checklist ini tidak menetapkan target performa arbitrer jika blueprint atau atur
 | Minimal satu `execution_rejected` terbaru | NOT YET VERIFIED | MA5 deferred | Belum ada sampel live terbaru |
 | Reconciliation setelah fill | NOT YET VERIFIED | MA5 deferred | Menunggu evidence execution baru |
 | Reconciliation setelah reject | NOT YET VERIFIED | MA5 deferred | Menunggu evidence execution baru |
-| Persistence setelah restart dengan posisi terbuka | EVIDENCE COLLECTED | recovery docs, persistence docs | Ada evidence recovery, tetapi belum lengkap untuk semua jalur trading |
+| Persistence setelah restart dengan posisi terbuka | VERIFIED | recovery docs, persistence docs | Ada evidence recovery, tetapi belum lengkap untuk semua jalur trading |
 
 ## E. Operational Statistics
 
 | Metric | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Jumlah runtime cycle | EVIDENCE COLLECTED | telemetry runtime_cycle | Sudah ada data operasional |
+| Jumlah runtime cycle | VERIFIED | telemetry runtime_cycle | Sudah ada data operasional |
 | Jumlah sinyal | EVIDENCE COLLECTED | telemetry runtime_cycle / signal telemetry | Ada observasi, namun belum dijadikan ukuran lulus/gagal final |
 | Jumlah order | NOT YET VERIFIED | MA5 deferred | Belum ada sampel eksekusi baru |
 | Jumlah fill | NOT YET VERIFIED | MA5 deferred | Menunggu `execution_filled` |
@@ -87,7 +108,26 @@ Checklist ini tidak menetapkan target performa arbitrer jika blueprint atau atur
 | Drawdown | EVIDENCE COLLECTED | runtime/account telemetry | Ada data, namun belum ditetapkan sebagai gate final |
 | Expectancy | NOT YET VERIFIED | — | Butuh sampel trading lebih besar |
 
-## F. Residual Risks
+## F. Open Evidence
+
+| Evidence | Owner | Blocking |
+| --- | --- | --- |
+| Fresh execution_filled | MA5 | Contest readiness |
+| Fresh execution_rejected | MA5 | Contest readiness |
+| MT5 restart rehearsal | Validation | Recovery gate |
+| Network interruption recovery | Validation | Operational gate |
+| Long-duration recovery envelope | Validation | Contest readiness |
+| Contest rehearsal evidence | Validation | Contest readiness |
+
+## G. Known Deferred Items
+
+| Item | Reason | Current State |
+| --- | --- | --- |
+| MA5 | Waiting for new execution sample | Deferred |
+| WS-M1 | Characterization only | Open, dormant |
+| Validation Program V2 | Long-duration gates not fully complete | In progress |
+
+## H. Residual Risks
 
 ### RR1 - WS-M1 Still Characterization
 
@@ -148,7 +188,21 @@ Mitigation:
 
 - continue long-duration recovery and restart observation
 
-## G. Final Decision
+## I. Exit Criteria
+
+Contest Ready = YES hanya jika semua berikut terpenuhi:
+
+- [ ] Architecture baseline frozen
+- [ ] Validation gates PASS
+- [ ] Runtime reliability PASS
+- [ ] Recovery validation PASS
+- [ ] Trading evidence VERIFIED
+- [ ] Operational statistics reviewed
+- [ ] Residual risks accepted
+
+Jika salah satu belum terpenuhi, maka keputusan tetap `NO`.
+
+## J. Final Decision
 
 | Area | Status |
 | --- | --- |
