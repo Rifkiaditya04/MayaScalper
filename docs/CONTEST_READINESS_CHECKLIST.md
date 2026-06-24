@@ -4,12 +4,46 @@
 
 | Field | Value |
 | --- | --- |
-| Checklist Version | 1.1 |
+| Checklist Version | 1.2 |
 | Last Updated | 2026-06-24 |
-| Baseline Commit | `187e1fa` |
+| Baseline Commit | `0dac4a1` |
+| Evidence Snapshot | `2026-06-24` |
+| Evidence Baseline Commit | `0dac4a1` |
 | Blueprint Version | `FINAL_BLUEPRINT V2.md` |
 | Validation Program Version | `docs/VALIDATION_PROGRAM_V2.md` |
 | Current Verdict | `NO` |
+
+## Evidence Freeze
+
+Checklist ini ditulis terhadap snapshot evidence yang tercantum di metadata.
+
+Artefak baseline yang dipakai saat review ini:
+
+- `docs/BLUEPRINT_COMPLIANCE_REVIEW.md`
+- `docs/VALIDATION_PROGRAM_V2.md`
+- hasil forward test dan telemetry yang sudah dibekukan sampai `2026-06-24`
+
+Baseline ini dipakai sebagai referensi keputusan, bukan sebagai klaim bahwa seluruh envelope operasional selamanya valid tanpa evaluasi ulang.
+
+## Evidence Expiry
+
+Evidence yang dipakai checklist ini harus dievaluasi ulang bila terjadi perubahan yang memengaruhi:
+
+- runtime contract
+- recovery contract
+- execution contract
+- deployment contract
+- broker/environment envelope
+
+Contoh pemicu expiry:
+
+- perubahan blueprint
+- perubahan kontrak runtime
+- perubahan policy eksekusi
+- perubahan arsitektur deployment
+- perubahan broker, terminal, atau environment yang mengubah kondisi validasi
+
+Jika pemicu expiry terjadi, status checklist ini tidak otomatis invalid, tetapi evidence baseline harus direview ulang sebelum dipakai sebagai dasar keputusan baru.
 
 ## Purpose
 
@@ -39,12 +73,14 @@ Status yang dipakai:
 - `IN PROGRESS`
 - `EVIDENCE COLLECTED`
 - `VERIFIED`
+- `ACCEPTED`
 - `NOT YET VERIFIED`
 
 Makna status:
 
 - `EVIDENCE COLLECTED` = evidence mentah sudah ada, tetapi belum cukup untuk gate final.
-- `VERIFIED` = evidence sudah direview dan cukup kuat untuk dinyatakan valid pada level checklist, tetapi belum tentu berarti seluruh program lulus.
+- `VERIFIED` = evidence sudah direview dan cukup kuat untuk dinyatakan valid pada level checklist.
+- `ACCEPTED` = evidence verified sudah diterima oleh review keputusan sebagai dasar gate operasional.
 - `PASS` = item lolos gate final pada area tersebut.
 - `IN PROGRESS` = item masih berjalan dan belum bisa disimpulkan.
 - `NOT YET VERIFIED` = item belum punya evidence yang cukup.
@@ -74,13 +110,13 @@ Checklist ini tidak menetapkan target performa arbitrer jika blueprint atau atur
 
 | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Startup synchronization stabil | PASS | B3 forward validation, telemetry `deployment.startup_sync` | Startup sync sudah tervalidasi |
-| Closed-M5 gate stabil | PASS | B4 forward validation, telemetry `deployment.closed_m5_gate` | Satu closed M5 memicu satu cycle |
-| Lock reclaim stabil | PASS | WL2 contract + forward validation | Single-instance reclaim Windows sudah tervalidasi |
+| Startup synchronization stabil | ACCEPTED | B3 forward validation, telemetry `deployment.startup_sync` | Startup sync sudah tervalidasi dan diterima sebagai baseline operasional |
+| Closed-M5 gate stabil | ACCEPTED | B4 forward validation, telemetry `deployment.closed_m5_gate` | Satu closed M5 memicu satu cycle |
+| Lock reclaim stabil | ACCEPTED | WL2 contract + forward validation | Single-instance reclaim Windows sudah tervalidasi |
 | Runtime loop deterministik dalam observasi saat ini | VERIFIED | FT7, no-regression 5-run observation | Observed behavior konsisten dengan blueprint |
 | Recovery rehearsal berhasil | EVIDENCE COLLECTED | WL2, recovery telemetry, reconciliation telemetry | Ada evidence recovery, tetapi belum seluruh skenario operasional jangka panjang |
 | MT5 restart recovery | IN PROGRESS | recovery docs, runtime telemetry | Butuh observasi tambahan untuk klaim penuh |
-| Network interruption recovery | NOT YET VERIFIED | — | Belum ada evidence spesifik yang cukup |
+| Network interruption recovery | NOT YET VERIFIED | - | Belum ada evidence spesifik yang cukup |
 
 ## D. Trading Evidence
 
@@ -101,12 +137,12 @@ Checklist ini tidak menetapkan target performa arbitrer jika blueprint atau atur
 | Jumlah order | NOT YET VERIFIED | MA5 deferred | Belum ada sampel eksekusi baru |
 | Jumlah fill | NOT YET VERIFIED | MA5 deferred | Menunggu `execution_filled` |
 | Jumlah reject | NOT YET VERIFIED | MA5 deferred | Menunggu `execution_rejected` |
-| Fill ratio | NOT YET VERIFIED | — | Belum cukup sampel |
-| Reject ratio | NOT YET VERIFIED | — | Belum cukup sampel |
+| Fill ratio | NOT YET VERIFIED | - | Belum cukup sampel |
+| Reject ratio | NOT YET VERIFIED | - | Belum cukup sampel |
 | Latency observasi | EVIDENCE COLLECTED | telemetry / broker timing | Sudah ada observasi, tetapi belum lengkap sebagai KPI final |
-| P/L | NOT YET VERIFIED | — | Belum menjadi basis keputusan |
+| P/L | NOT YET VERIFIED | - | Belum menjadi basis keputusan |
 | Drawdown | EVIDENCE COLLECTED | runtime/account telemetry | Ada data, namun belum ditetapkan sebagai gate final |
-| Expectancy | NOT YET VERIFIED | — | Butuh sampel trading lebih besar |
+| Expectancy | NOT YET VERIFIED | - | Butuh sampel trading lebih besar |
 
 ## F. Open Evidence
 
@@ -202,7 +238,21 @@ Contest Ready = YES hanya jika semua berikut terpenuhi:
 
 Jika salah satu belum terpenuhi, maka keputusan tetap `NO`.
 
-## J. Final Decision
+## J. Reopen Criteria
+
+Checklist ini harus direview ulang apabila terjadi salah satu kondisi berikut:
+
+- regression yang dapat direproduksi
+- perubahan blueprint
+- perubahan kontrak runtime
+- perubahan runtime policy
+- perubahan execution policy
+- perubahan deployment architecture
+- perubahan broker atau environment yang mengubah validation envelope
+
+Jika salah satu pemicu ini terjadi, evidence snapshot harus diperbarui sebelum checklist dipakai kembali sebagai dasar keputusan.
+
+## K. Final Decision
 
 | Area | Status |
 | --- | --- |
@@ -226,4 +276,3 @@ Set `Contest Ready = YES` only when:
 - residual risks are acceptable by the operational standard of the project.
 
 If any of those are missing, the correct answer remains `NO`.
-
