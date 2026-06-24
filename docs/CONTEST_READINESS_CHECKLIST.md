@@ -80,7 +80,7 @@ Makna status:
 
 - `EVIDENCE COLLECTED` = evidence mentah sudah ada, tetapi belum cukup untuk gate final.
 - `VERIFIED` = evidence sudah direview dan cukup kuat untuk dinyatakan valid pada level checklist.
-- `ACCEPTED` = evidence yang telah `VERIFIED` dan diterima melalui proses review proyek sebagai dasar keputusan operasional pada checklist ini.
+- `ACCEPTED` = evidence yang telah `VERIFIED` dan secara eksplisit diterima melalui proses governance proyek yang terdokumentasi sebagai dasar keputusan operasional pada checklist ini.
 - `PASS` = item lolos gate final pada area tersebut.
 - `IN PROGRESS` = item masih berjalan dan belum bisa disimpulkan.
 - `NOT YET VERIFIED` = item belum punya evidence yang cukup.
