@@ -80,7 +80,7 @@ Makna status:
 
 - `EVIDENCE COLLECTED` = evidence mentah sudah ada, tetapi belum cukup untuk gate final.
 - `VERIFIED` = evidence sudah direview dan cukup kuat untuk dinyatakan valid pada level checklist.
-- `ACCEPTED` = evidence verified sudah diterima oleh review keputusan sebagai dasar gate operasional.
+- `ACCEPTED` = evidence yang telah `VERIFIED` dan diterima melalui proses review proyek sebagai dasar keputusan operasional pada checklist ini.
 - `PASS` = item lolos gate final pada area tersebut.
 - `IN PROGRESS` = item masih berjalan dan belum bisa disimpulkan.
 - `NOT YET VERIFIED` = item belum punya evidence yang cukup.
@@ -238,6 +238,8 @@ Contest Ready = YES hanya jika semua berikut terpenuhi:
 
 Jika salah satu belum terpenuhi, maka keputusan tetap `NO`.
 
+Status pada level item menggambarkan kondisi masing-masing persyaratan. Status pada level area merupakan penilaian operasional terhadap area tersebut secara keseluruhan dan tidak dihitung sebagai agregasi otomatis dari seluruh status item.
+
 ## J. Reopen Criteria
 
 Checklist ini harus direview ulang apabila terjadi salah satu kondisi berikut:
@@ -253,6 +255,8 @@ Checklist ini harus direview ulang apabila terjadi salah satu kondisi berikut:
 Jika salah satu pemicu ini terjadi, evidence snapshot harus diperbarui sebelum checklist dipakai kembali sebagai dasar keputusan.
 
 ## K. Final Decision
+
+`Current Verdict` merupakan keputusan berdasarkan evidence baseline yang tercantum pada metadata checklist ini dan bukan hasil agregasi otomatis dari seluruh status item.
 
 | Area | Status |
 | --- | --- |
