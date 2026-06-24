@@ -303,3 +303,45 @@ artifacts/M1-20260619-002-raw-bars.json
 ```
 
 Referensikan file lampiran di bagian "Observation" atau "Free-form notes" agar dokumen utama tetap ringkas.
+
+---
+
+### M1-20260624-20S-CAMPAIGN
+
+- Runtime date (UTC): `2026-06-24`
+- Run type: forward test campaign
+- Build / repo commit: `43af549`
+- Sample count: `20`
+- Startup PASS: `20/20`
+- Runtime PASS: `20/20`
+- M1 closed_bars_insufficient observed: `0/20`
+- Forward cycles observed: `2/20`
+
+Observation:
+
+- The 20-sample campaign did not reproduce the earlier M1 failure.
+- Within this campaign, M1 readiness was stable enough to allow runtime startup in every attempt.
+- The behavior remains intermittent across the broader evidence set, so the characterization remains open.
+
+Evidence references:
+
+- `validation/RV1/logs/20260624T040031Z-rv1-sample-01.log`
+- `validation/RV1/logs/20260624T040032Z-rv1-sample-02.log`
+- `validation/RV1/logs/20260624T040033Z-rv1-sample-03.log`
+- `validation/RV1/logs/20260624T040425Z-rv1-sample-04.log`
+- `validation/RV1/logs/20260624T040928Z-rv1-sample-05.log`
+- `validation/RV1/logs/20260624T040929Z-rv1-sample-06.log`
+- `validation/RV1/logs/20260624T040930Z-rv1-sample-07.log`
+- `validation/RV1/logs/20260624T040931Z-rv1-sample-08.log`
+- `validation/RV1/logs/20260624T040932Z-rv1-sample-09.log`
+- `validation/RV1/logs/20260624T040933Z-rv1-sample-10.log`
+- `validation/RV1/logs/20260624T040934Z-rv1-sample-11.log`
+- `validation/RV1/logs/20260624T040935Z-rv1-sample-12.log`
+- `validation/RV1/logs/20260624T040936Z-rv1-sample-13.log`
+- `validation/RV1/logs/20260624T040937Z-rv1-sample-14.log`
+- `validation/RV1/logs/20260624T040938Z-rv1-sample-15.log`
+- `validation/RV1/logs/20260624T040939Z-rv1-sample-16.log`
+- `validation/RV1/logs/20260624T040940Z-rv1-sample-17.log`
+- `validation/RV1/logs/20260624T040941Z-rv1-sample-18.log`
+- `validation/RV1/logs/20260624T040942Z-rv1-sample-19.log`
+- `validation/RV1/logs/20260624T040943Z-rv1-sample-20.log`

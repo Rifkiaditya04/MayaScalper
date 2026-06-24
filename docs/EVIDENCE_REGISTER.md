@@ -12,6 +12,7 @@ Gunakan ID evidence yang konsisten agar review, daily log, dan checklist bisa di
 | EV-002 | 2026-06-26 | execution_filled | Trading Evidence | VERIFIED | reconciliation OK |
 | EV-003 | 2026-06-24 | deployment.startup_sync / runtime_started | Runtime Reliability | VERIFIED | forward validation startup passed |
 | EV-004 | 2026-06-24 | deployment.market_data_readiness | Validation Gates | VERIFIED | M1 closed_bars_insufficient; no checklist status change |
+| EV-005 | 2026-06-24 | RV1 20-sample campaign | Validation Gates / WS-M1 | VERIFIED | M1 failure not reproduced across 20 attempts |
 
 ## Rules
 
