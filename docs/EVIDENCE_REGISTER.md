@@ -13,6 +13,7 @@ Gunakan ID evidence yang konsisten agar review, daily log, dan checklist bisa di
 | EV-003 | 2026-06-24 | deployment.startup_sync / runtime_started | Runtime Reliability | VERIFIED | forward validation startup passed |
 | EV-004 | 2026-06-24 | deployment.market_data_readiness | Validation Gates | VERIFIED | M1 closed_bars_insufficient; no checklist status change |
 | EV-005 | 2026-06-24 | RV1 20-sample campaign | Validation Gates / WS-M1 | VERIFIED | M1 failure not reproduced across 20 attempts |
+| EV-006 | 2026-06-25 | deployment.market_data_readiness / runtime db | Validation Gates / WO-017 | VERIFIED | M5 runtime occurrence: 69 closed bars on runtime cycle; characterization only |
 
 ## Rules
 
