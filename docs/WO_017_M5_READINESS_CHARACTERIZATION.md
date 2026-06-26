@@ -191,3 +191,15 @@ Karena itu, evidence saat ini cukup untuk karakterisasi operasional, tetapi belu
 - mengubah kontrak runtime atau blueprint.
 
 Observasi tambahan tetap diperlukan sebagai bagian dari Validation Program.
+
+## Update Observation
+
+Kondisi `closed_bar_count = 69` pada runtime cycle telah diamati lagi pada run tanggal `2026-06-26`.
+
+Pada run tersebut, startup readiness tercapai terlebih dahulu pada `GBPUSD`, lalu runtime cycle berikutnya menghasilkan kegagalan snapshot pada `GBPJPY` dengan pola closed-bar yang sama.
+
+Dengan demikian, evidence saat ini menunjukkan bahwa fenomena tersebut bersifat recurrent dalam kondisi operasional tertentu, tetapi tetap belum cukup untuk:
+
+- menyimpulkan akar penyebab;
+- membuktikan regresi implementasi;
+- mengubah status governance.
