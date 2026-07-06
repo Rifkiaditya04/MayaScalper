@@ -203,3 +203,42 @@ Dengan demikian, evidence saat ini menunjukkan bahwa fenomena tersebut bersifat 
 - menyimpulkan akar penyebab;
 - membuktikan regresi implementasi;
 - mengubah status governance.
+
+## Occurrence Matrix
+
+Occurrence berikut adalah kejadian `deployment.market_data_readiness` bertipe `closed_bars_insufficient` untuk timeframe M5 yang muncul pada window evidence terbaru. Dua kejadian M1 pada window yang sama didokumentasikan terpisah di `docs/M1_FAILURE_CHARACTERIZATION.md`.
+
+| Event ID | Date (UTC) | Symbol | TF | Closed/Req | Future | Broker Time (UTC) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3253 | 2026-07-02 | GBPJPY | M5 | 68/71 | 2 | 2026-07-02T04:38:45+00:00 |
+| 3773 | 2026-07-02 | EURUSD | M5 | 69/71 | 1 | 2026-07-02T04:44:15+00:00 |
+| 4649 | 2026-07-02 | GBPJPY | M5 | 69/71 | 1 | 2026-07-02T04:51:15+00:00 |
+| 4669 | 2026-07-02 | EURUSD | M5 | 69/71 | 1 | 2026-07-02T05:04:13+00:00 |
+| 4689 | 2026-07-02 | EURUSD | M5 | 69/71 | 1 | 2026-07-02T05:04:13+00:00 |
+| 4709 | 2026-07-02 | EURUSD | M5 | 69/71 | 1 | 2026-07-02T05:04:13+00:00 |
+| 4729 | 2026-07-02 | EURUSD | M5 | 69/71 | 1 | 2026-07-02T05:04:13+00:00 |
+| 5659 | 2026-07-02 | GBPJPY | M5 | 69/71 | 1 | 2026-07-02T05:24:38+00:00 |
+| 5698 | 2026-07-06 | EURUSD | M5 | 67/71 | 3 | 2026-07-06T02:14:19+00:00 |
+| 5717 | 2026-07-06 | GBPJPY | M5 | 69/71 | 1 | 2026-07-06T02:14:19+00:00 |
+| 6544 | 2026-07-06 | GBPJPY | M5 | 69/71 | 1 | 2026-07-06T02:20:13+00:00 |
+| 8221 | 2026-07-06 | GBPJPY | M5 | 69/71 | 1 | 2026-07-06T02:44:40+00:00 |
+| 8602 | 2026-07-06 | GBPJPY | M5 | 69/71 | 1 | 2026-07-06T02:49:31+00:00 |
+| 8990 | 2026-07-06 | GBPJPY | M5 | 69/71 | 1 | 2026-07-06T02:53:14+00:00 |
+| 9009 | 2026-07-06 | GBPJPY | M5 | 69/71 | 1 | 2026-07-06T02:53:14+00:00 |
+| 9028 | 2026-07-06 | GBPJPY | M5 | 69/71 | 1 | 2026-07-06T02:53:14+00:00 |
+| 9241 | 2026-07-06 | GBPJPY | M5 | 69/71 | 1 | 2026-07-06T02:59:33+00:00 |
+| 10680 | 2026-07-06 | GBPJPY | M5 | 69/71 | 1 | 2026-07-06T03:18:16+00:00 |
+| 10767 | 2026-07-06 | GBPJPY | M5 | 69/71 | 1 | 2026-07-06T03:32:28+00:00 |
+| 10786 | 2026-07-06 | GBPJPY | M5 | 69/71 | 1 | 2026-07-06T03:39:47+00:00 |
+| 11516 | 2026-07-06 | EURUSD | M5 | 69/71 | 1 | 2026-07-06T03:49:11+00:00 |
+
+## Pattern Summary
+
+- Total M5 occurrences in this window: `21`
+- GBPJPY M5 occurrences: `14`
+- EURUSD M5 occurrences: `7`
+- Dominant pattern: `closed_bar_count = 69`, `requested_bars = 71`, `returned_bars = 71`, `future_count = 1`
+- Outliers:
+  - `3253` with `closed_bar_count = 68`, `future_count = 2`
+  - `5698` with `closed_bar_count = 67`, `future_count = 3`
+- The two M1 occurrences in the same window are intentionally excluded from this WO-017 table and are documented in `docs/M1_FAILURE_CHARACTERIZATION.md`.

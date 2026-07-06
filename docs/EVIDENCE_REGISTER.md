@@ -15,6 +15,9 @@ Gunakan ID evidence yang konsisten agar review, daily log, dan checklist bisa di
 | EV-005 | 2026-06-24 | RV1 20-sample campaign | Validation Gates / WS-M1 | VERIFIED | M1 failure not reproduced across 20 attempts |
 | EV-006 | 2026-06-25 | deployment.market_data_readiness / runtime db | Validation Gates / WO-017 | VERIFIED | M5 runtime occurrence: 69 closed bars on runtime cycle; characterization only |
 | EV-007 | 2026-06-26 | deployment.market_data_readiness / runtime db | Validation Gates / WO-017 | VERIFIED | Recurrent M5 runtime occurrence: startup readiness on GBPUSD, runtime failure on GBPJPY |
+| EV-008 | 2026-07-02 | deployment.market_data_readiness / runtime db | Validation Gates / WS-M1 | VERIFIED | M1 runtime occurrence on GBPJPY; 15 closed bars, 24 future bars |
+| EV-009 | 2026-07-06 | deployment.market_data_readiness / runtime db | Validation Gates / WS-M1 | VERIFIED | M1 runtime occurrence on GBPJPY; 25 closed bars, 14 future bars |
+| EV-010 | 2026-07-02 to 2026-07-06 | deployment.market_data_readiness / runtime db | Validation Gates / WO-017 | VERIFIED | 21 recurrent M5 occurrences across GBPJPY/EURUSD; dominant pattern 69/71 closed bars |
 
 ## Rules
 

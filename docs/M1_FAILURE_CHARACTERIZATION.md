@@ -345,3 +345,147 @@ Evidence references:
 - `validation/RV1/logs/20260624T040941Z-rv1-sample-18.log`
 - `validation/RV1/logs/20260624T040942Z-rv1-sample-19.log`
 - `validation/RV1/logs/20260624T040943Z-rv1-sample-20.log`
+
+---
+
+### M1-20260702-001
+
+- Runtime date (UTC): `2026-07-02`
+- Run type: forward validation
+- Build / repo commit: `unknown`
+- Profile: `FORWARD_SAFE`
+- Broker: `unknown`
+- Symbol: `GBPJPY`
+- Telemetry event: `deployment.market_data_readiness`
+- Event id: `3234`
+- Stage: `closed_bars_insufficient`
+- Reason: `Not enough closed bars for timeframe M1: need at least 34`
+
+Snapshot:
+
+- `requested_bars = 40`
+- `returned_bars = 40`
+- `minimum_closed_bar_count = 34`
+- `closed_bar_count = 15`
+- `forming_count = 1`
+- `future_count = 24`
+- `duplicate_close_time_count = 0`
+- `payload_health = GREEN`
+
+Time context:
+
+- `broker_time_utc = 2026-07-02T02:15:35+00:00`
+- `latest_tick_timestamp_utc = 2026-07-02T02:15:34+00:00`
+- `latest_raw_open_time_utc = 2026-07-02T02:40:00+00:00`
+- `latest_raw_close_time_utc = 2026-07-02T02:41:00+00:00`
+- `latest_closed_bar_close_time_utc = 2026-07-02T02:15:00+00:00`
+- `delta_tick_to_broker_seconds = 1.0`
+- `delta_raw_close_to_broker_seconds = -1525.0`
+- `delta_closed_close_to_broker_seconds = 35.0`
+
+Runtime:
+
+- `startup_sync_completed = true`
+- `runtime_started = true`
+- `cycle_number = 0`
+- `last_processed_m5_close_utc = n/a`
+- `closed_m5_gate = n/a`
+
+Feed context:
+
+- `symbol_info_tick_result = unknown`
+- `retry_count = unknown`
+- `stream_used = unknown`
+- `stream_tick_found = unknown`
+- `rates_fallback_used = unknown`
+- `tick_time_fallback_source = unknown`
+- `final_time_source = unknown`
+
+Observation:
+
+- Runtime started normally and then failed on GBPJPY during M1 snapshot validation.
+- The sample is materially more extreme than the earlier M1 cases because the closed count dropped to 15 while future bars increased to 24.
+- This is still an M1 characterization case and does not affect WO-017.
+
+Initial classification:
+
+- [ ] Timing
+- [ ] MT5 bridge
+- [ ] Race condition
+- [x] Unknown
+
+Raw dump reference:
+
+- `telemetry_index.id = 3234`
+
+---
+
+### M1-20260706-001
+
+- Runtime date (UTC): `2026-07-06`
+- Run type: forward validation
+- Build / repo commit: `unknown`
+- Profile: `FORWARD_SAFE`
+- Broker: `unknown`
+- Symbol: `GBPJPY`
+- Telemetry event: `deployment.market_data_readiness`
+- Event id: `5678`
+- Stage: `closed_bars_insufficient`
+- Reason: `Not enough closed bars for timeframe M1: need at least 34`
+
+Snapshot:
+
+- `requested_bars = 40`
+- `returned_bars = 40`
+- `minimum_closed_bar_count = 34`
+- `closed_bar_count = 25`
+- `forming_count = 1`
+- `future_count = 14`
+- `duplicate_close_time_count = 0`
+- `payload_health = GREEN`
+
+Time context:
+
+- `broker_time_utc = 2026-07-06T02:12:46+00:00`
+- `latest_tick_timestamp_utc = 2026-07-06T02:13:34+00:00`
+- `latest_raw_open_time_utc = 2026-07-06T02:29:00+00:00`
+- `latest_raw_close_time_utc = 2026-07-06T02:30:00+00:00`
+- `latest_closed_bar_close_time_utc = 2026-07-06T02:12:00+00:00`
+- `delta_tick_to_broker_seconds = -48.0`
+- `delta_raw_close_to_broker_seconds = -1034.0`
+- `delta_closed_close_to_broker_seconds = 46.0`
+
+Runtime:
+
+- `startup_sync_completed = true`
+- `runtime_started = true`
+- `cycle_number = 0`
+- `last_processed_m5_close_utc = n/a`
+- `closed_m5_gate = n/a`
+
+Feed context:
+
+- `symbol_info_tick_result = unknown`
+- `retry_count = unknown`
+- `stream_used = unknown`
+- `stream_tick_found = unknown`
+- `rates_fallback_used = unknown`
+- `tick_time_fallback_source = unknown`
+- `final_time_source = unknown`
+
+Observation:
+
+- Runtime started normally and then failed on GBPJPY during M1 snapshot validation.
+- Compared with the earlier M1 case, this one still under-shoots the minimum but leaves a larger closed-bar window than `M1-20260702-001`.
+- This confirms the M1 issue remains intermittent and needs characterization, not a contract change.
+
+Initial classification:
+
+- [ ] Timing
+- [ ] MT5 bridge
+- [ ] Race condition
+- [x] Unknown
+
+Raw dump reference:
+
+- `telemetry_index.id = 5678`
