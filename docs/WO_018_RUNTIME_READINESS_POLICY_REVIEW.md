@@ -2,7 +2,7 @@
 
 ## Metadata
 
-- Status: Open
+- Status: Closed
 - Objective type: Governance review
 - Evidence baseline: 2026-07-07
 - Related docs:
@@ -238,16 +238,18 @@ Tambahan evidence operasional yang sudah dikarakterisasi:
 
 ### Decision A
 
-**Pertahankan policy saat ini.**
+**Berdasarkan evidence yang tersedia, tidak terdapat dasar yang cukup untuk mengubah runtime policy saat ini.**
 
-`No implementation required.`
+Runtime policy tetap dipertahankan sebagai baseline governance.
+
+Jika di masa depan organisasi memutuskan memperkenalkan runtime recovery untuk snapshot readiness, perubahan tersebut harus diperlakukan sebagai workstream baru yang mendefinisikan kontrak baru sebelum implementasi.
 
 Alasan:
 
 - evidence operasional menunjukkan policy fail-fast sering tersentuh, tetapi bukan terbukti salah
 - contract saat ini konsisten dengan implementation structure
 - recoverable policy untuk snapshot readiness belum didefinisikan secara governed
-- perubahan ke policy recoverable akan memerlukan WO-019
+- perubahan ke policy recoverable akan memerlukan workstream baru
 
 ---
 
@@ -255,4 +257,4 @@ Alasan:
 
 - Dokumen ini sengaja tidak mengubah runtime behavior.
 - Dokumen ini juga tidak menganggap recurring occurrence sebagai bukti bahwa fail-fast salah.
-- Jika nanti governance ingin memperkenalkan recoverable runtime condition, maka hasil WO-018 ini menjadi baseline keputusan untuk WO-019.
+- Jika nanti governance ingin memperkenalkan recoverable runtime condition, maka hasil WO-018 ini menjadi baseline keputusan untuk workstream baru berikutnya.
