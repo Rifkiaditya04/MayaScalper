@@ -1,0 +1,68 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260706091536
+Username: FORTUNE-LOOP\User
+RunAs User: FORTUNE-LOOP\User
+Configuration Name: 
+Machine: FORTUNE-LOOP (Microsoft Windows NT 10.0.22631.0)
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+Process ID: 15508
+PSVersion: 5.1.22621.2506
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.22621.2506
+BuildVersion: 10.0.22621.2506
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is validation\RV1\logs\20260706T021536Z-demo-all-day.log
+PS D:\Maya\Scalper>
+PS D:\Maya\Scalper>
+(Pradita) try {
+    & $py -m tsp_v2.run_v2 preflight `
+        --config deploy/v2/configs/forward_live.yaml `
+        --env-file .env
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Preflight failed with exit code $LASTEXITCODE"
+    }
+
+    @'
+from pathlib import Path
+from tsp_v2.config import load_config
+from tsp_v2.deployment import DeploymentRuntime
+
+config = load_config(
+    config_path=Path(r"deploy/v2/configs/forward_live.yaml"),
+    env_path=Path(r".env"),
+)
+
+runtime = DeploymentRuntime(config)
+report = runtime.start(dry_run=False, max_cycles=None)
+print(report)
+'@ | & $py -
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Runtime failed with exit code $LASTEXITCODE"
+    }
+}
+finally {
+    Stop-Transcript | Out-Null
+}
+
+Traceback (most recent call last):
+  File "<stdin>", line 11, in <module>
+  File "D:\Maya\Scalper\tsp_v2\deployment.py", line 511, in start
+    live_report = runner.run(max_cycles=max_cycles, current_time_utc=startup_time_utc)
+  File "D:\Maya\Scalper\tsp_v2\live_runtime.py", line 176, in run
+    cycle_report = self._run_cycle()
+  File "D:\Maya\Scalper\tsp_v2\live_runtime.py", line 277, in _run_cycle
+    snapshot = build_market_snapshot(
+  File "D:\Maya\Scalper\tsp_v2\snapshots.py", line 250, in build_market_snapshot
+    raise ConfigValidationError(
+tsp_v2.config_schema.ConfigValidationError: Not enough closed bars for timeframe M5: need at least 70
+**********************
+Windows PowerShell transcript end
+End time: 20260706092510
+**********************

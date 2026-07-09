@@ -1,0 +1,58 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260702114444
+Username: FORTUNE-LOOP\User
+RunAs User: FORTUNE-LOOP\User
+Configuration Name: 
+Machine: FORTUNE-LOOP (Microsoft Windows NT 10.0.22631.0)
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+Process ID: 21296
+PSVersion: 5.1.22621.2506
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.22621.2506
+BuildVersion: 10.0.22621.2506
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is validation\RV1\logs\20260702T044444Z-demo-all-day.log
+PS D:\Maya\Scalper>
+PS D:\Maya\Scalper>
+(Pradita) try {
+    & $py -m tsp_v2.run_v2 preflight `
+        --config deploy/v2/configs/forward_live.yaml `
+        --env-file .env
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Preflight failed with exit code $LASTEXITCODE"
+    }
+
+    @'
+from pathlib import Path
+from tsp_v2.config import load_config
+from tsp_v2.deployment import DeploymentRuntime
+
+config = load_config(
+    config_path=Path(r"deploy/v2/configs/forward_live.yaml"),
+    env_path=Path(r".env"),
+)
+
+runtime = DeploymentRuntime(config)
+report = runtime.start(dry_run=False, max_cycles=None)
+print(report)
+'@ | & $py -
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Runtime failed with exit code $LASTEXITCODE"
+    }
+}
+finally {
+    Stop-Transcript | Out-Null
+}
+
+
+**********************
+Windows PowerShell transcript end
+End time: 20260702115453
+**********************
