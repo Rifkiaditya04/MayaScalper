@@ -18,6 +18,12 @@ logs/
 !validation/RV1/
 !validation/RV1/logs/
 !validation/RV1/logs/*.log
+!runtime/
+!runtime/forward_live/
+!runtime/forward_live/db/
+!runtime/forward_live/db/tsp_v2_runtime.sqlite3
+!validation/MT5_JOURNAL/
+!validation/MT5_JOURNAL/*.log
 
 # secrets
 .env
