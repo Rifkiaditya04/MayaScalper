@@ -21,6 +21,7 @@ Severity policy:
 | V2-006 | PATCH-003 | Partial payload degradation policy not yet explicit for mixed-good/mixed-missing timeframe inputs | P2 | CLOSED | Codex | PATCH-007A | Snapshot payload health now classifies GREEN/YELLOW/RED explicitly; thin payloads are allowed only when above minimum and partial payloads below minimum fail loud |
 | V2-007 | PATCH-003 | Spread anomaly classification thresholds need explicit confirmation or formalization | P1 | CLOSED | Codex | PATCH-005 | Canonical spread health now emitted in snapshot contract and consumed by signal gating |
 | V2-008 | PATCH-004 | MICRO latency gate ambiguity between feed health and explicit latency doctrine | P1 | CLOSED | Codex | PATCH-005 | Explicit `latency_health` snapshot field added and MICRO signal rejects any non-GREEN latency |
+| DR-001 | RV1 Campaign (2026-07) | Broker reconciliation counts `EXPIRED` execution_registry entries with `broker_ticket = NULL` as `MISSING_BROKER`, keeping `ready_to_resume` permanently `false` | P1 | OPEN | - | - | See `docs/DR_001_BROKER_RECONCILIATION_MISSING_BROKER_MISCLASSIFICATION.md`. Scope isolated to `tsp_v2/recovery/reconcile.py`; independent of WO-017/WO-018 |
 
 ## Closure Rule
 
