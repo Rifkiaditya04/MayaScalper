@@ -229,6 +229,76 @@ class BrokerReconciliationRuntimeTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_expired_entries_without_ticket_are_not_counted_as_missing_broker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = _load_config(root)
+            store = SQLiteRuntimeStore(config.persistence.sqlite_path)
+            try:
+                store.initialize()
+                store.set_config_fingerprint(config.fingerprint)
+                cycle_time = datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc)
+                store.store_execution_registry(
+                    (
+                        ExecutionRegistryEntry(
+                            setup_id="expired-1",
+                            submission_uuid="expired-1",
+                            symbol="XAUUSD",
+                            state=ExecutionRegistryState.EXPIRED,
+                            updated_at_utc=cycle_time - timedelta(minutes=1),
+                            direction=Direction.LONG,
+                            decision_price=100.1,
+                            cycle_time_utc=cycle_time - timedelta(minutes=2),
+                            expires_at_utc=cycle_time - timedelta(minutes=1),
+                        ),
+                        ExecutionRegistryEntry(
+                            setup_id="expired-2",
+                            submission_uuid="expired-2",
+                            symbol="XAUUSD",
+                            state=ExecutionRegistryState.CANCELLED,
+                            updated_at_utc=cycle_time - timedelta(minutes=1),
+                            direction=Direction.SHORT,
+                            decision_price=100.2,
+                            cycle_time_utc=cycle_time - timedelta(minutes=2),
+                            expires_at_utc=cycle_time - timedelta(minutes=1),
+                        ),
+                        ExecutionRegistryEntry(
+                            setup_id="active-1",
+                            submission_uuid="active-1",
+                            symbol="XAUUSD",
+                            state=ExecutionRegistryState.PENDING,
+                            updated_at_utc=cycle_time,
+                            direction=Direction.LONG,
+                            decision_price=100.3,
+                            cycle_time_utc=cycle_time,
+                            expires_at_utc=cycle_time + timedelta(minutes=2),
+                        ),
+                    )
+                )
+                runtime = BrokerReconciliationRuntime(store)
+                report = runtime.reconcile(
+                    FakeBrokerTruth(
+                        account={
+                            "equity": 100000.0,
+                            "balance": 100000.0,
+                            "drawdown_pct": 0.0,
+                            "daily_loss_pct": 0.0,
+                            "unrealized_r": 0.0,
+                        },
+                    ),
+                    at_utc=cycle_time + timedelta(seconds=30),
+                )
+                self.assertEqual(report.missing_broker_count, 1)
+                missing_broker_identifiers = {
+                    finding.identifier
+                    for finding in report.findings
+                    if finding.scope == "registry" and finding.status == "MISSING_BROKER"
+                }
+                self.assertEqual(missing_broker_identifiers, {"active-1"})
+                self.assertTrue(report.ready_to_resume is False)
+            finally:
+                store.close()
+
     def test_reconciliation_detects_account_and_order_divergence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

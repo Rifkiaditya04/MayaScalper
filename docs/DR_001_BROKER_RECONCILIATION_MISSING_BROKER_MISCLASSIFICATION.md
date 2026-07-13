@@ -107,6 +107,7 @@ Kedua opsi menyelesaikan masalah yang berbeda dan tidak saling eksklusif. Tidak 
 ## Status Kerja
 
 - [x] Defect dikonfirmasi dengan evidence kode + database + telemetry.
-- [ ] Keputusan Opsi A / Opsi B / kombinasi keduanya.
-- [ ] Implementasi (setelah keputusan).
-- [ ] Verifikasi ulang `ready_to_resume` pasca-perbaikan.
+- [x] Keputusan Opsi A.
+- [x] Implementasi `PATCH-DR001A`.
+- [x] Regression suite lulus.
+- [ ] Verifikasi ulang `ready_to_resume` pasca-perbaikan pada forward DB campaign berikutnya.

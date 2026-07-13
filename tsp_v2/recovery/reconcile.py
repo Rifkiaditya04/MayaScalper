@@ -138,6 +138,8 @@ class BrokerReconciliationRuntime:
         matched_broker_positions: set[int] = set()
 
         for entry in local_registry:
+            if _skip_missing_broker_check(entry):
+                continue
             broker_match = _find_broker_record(entry, broker_registry_index)
             if broker_match is None:
                 missing_broker_count += 1
@@ -516,6 +518,10 @@ def _find_broker_record(entry: ExecutionRegistryEntry, index: Mapping[str, Broke
         if key and key in index:
             return index[key]
     return None
+
+
+def _skip_missing_broker_check(entry: ExecutionRegistryEntry) -> bool:
+    return entry.state in {ExecutionRegistryState.EXPIRED, ExecutionRegistryState.CANCELLED} and entry.broker_ticket is None
 
 
 def _find_position_record(row: Mapping[str, Any], index: Mapping[str, BrokerRecord]) -> BrokerRecord | None:
