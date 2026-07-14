@@ -59,13 +59,13 @@ Audit ini mengikuti tiga lapisan:
 
 ## Coverage Assessment
 
-Every runtime-facing exception path discovered in the current code maps to an existing WS-019 category, but not every source is named with equal specificity.
+Every runtime-facing exception path examined during this audit maps to an existing WS-019 category, but not every source is named with equal specificity.
 
-The explicit documentation gap found in WS-019 is the news-snapshot / news-provider family (`build_news_snapshot()` and its validation helpers). Those exceptions are runtime-facing and do reach `run()`, but WS-019 currently only covers them indirectly under the generic catch-all category.
+The explicit documentation gap found in WS-019 is the news-snapshot / news-provider family (`build_news_snapshot()` and its validation helpers). Those exceptions are runtime-facing and do reach `run()`, but WS-019 currently only covers them indirectly under the generic catch-all category. The gap is documentation specificity rather than runtime observability.
 
 The only item that is not a current runtime-facing path is `SnapshotBuildConfig.__post_init__` (`snapshots.py:42-49`): it raises `ValueError` if invoked with invalid parameters, but `_run_cycle()` currently constructs `SnapshotBuildConfig()` with default values only (`snapshots.py:65`), so this path is internal-only in the current runtime execution model.
 
-No undocumented runtime exception path was found that would require a new runtime failure class beyond the news-snapshot family already noted above.
+No additional runtime-facing exception path requiring a new WS-019 failure category was found beyond the news-snapshot family already noted above.
 
 ---
 
