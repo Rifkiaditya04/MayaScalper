@@ -42,7 +42,7 @@ The campaign did not produce `execution_filled` or `execution_rejected`.
 ## Evidence
 
 - Start and end time UTC: `2026-07-15T03:31:57+00:00` to `2026-07-15T03:39:35+00:00`
-- `cycles_completed = 2`
+- `runtime_stopped.payload.cycles_completed = 2`
 - Transcript: `validation/V2-V03/logs/WO023_20260715T033157Z-forward-run.log`
 - Runtime DB: `runtime/forward_live/db/tsp_v2_runtime.sqlite3`
 - Telemetry summary:

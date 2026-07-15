@@ -52,7 +52,7 @@ Implikasi:
 
 ### Outcome
 
-Campaign sempat berjalan dua cycle runtime, tetapi berhenti pada gate M5 readiness.
+`runtime_stopped` payload records `cycles_completed = 2`; the campaign terminated on the M5 readiness gate before any execution evidence was produced.
 
 ### Evidence
 
