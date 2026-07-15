@@ -242,3 +242,22 @@ Occurrence berikut adalah kejadian `deployment.market_data_readiness` bertipe `c
   - `3253` with `closed_bar_count = 68`, `future_count = 2`
   - `5698` with `closed_bar_count = 67`, `future_count = 3`
 - The two M1 occurrences in the same window are intentionally excluded from this WO-017 table and are documented in `docs/M1_FAILURE_CHARACTERIZATION.md`.
+
+## WO-023 Batch (2026-07-15)
+
+Evidence batch berikut berasal dari delapan forward run pada hari yang sama. Semua run berhenti pada gate M5 readiness yang sama, tidak menghasilkan execution sample, dan mempertahankan signature `69/71`.
+
+| Log | Symbol | Cycles | Closed/Req | Future | Exec | Outcome |
+| --- | --- | ---: | --- | ---: | ---: | --- |
+| `WO023_20260715T033157Z-forward-run.log` | GBPJPY | 2 | 69/71 | 1 | 0 | stop |
+| `WO023_20260715T081946Z-forward-run.log` | GBPJPY | 4 | 69/71 | 1 | 0 | stop |
+| `WO023_20260715T082146Z-forward-run.log` | GBPJPY | 4 | 69/71 | 1 | 0 | stop |
+| `WO023_20260715T102343Z-forward-run.log` | GBPJPY | 2 | 69/71 | 1 | 0 | stop |
+| `WO023_20260715T114816Z-forward-run.log` | EURUSD | 3 | 69/71 | 1 | 0 | stop |
+| `WO023_20260715T114903Z-forward-run.log` | EURUSD | 3 | 69/71 | 1 | 0 | stop |
+| `WO023_20260715T115351Z-forward-run.log` | EURUSD | 3 | 69/71 | 1 | 0 | stop |
+| `WO023_20260715T120716Z-forward-run.log` | EURUSD | 3 | 69/71 | 1 | 0 | stop |
+
+- Semua run di batch ini menghasilkan `ConfigValidationError: Not enough closed bars for timeframe M5: need at least 70`.
+- Semua run di batch ini konsisten dengan semantik `cycle_time_utc` sebagai cutoff pada `docs/M5_CLOSE_SEMANTICS.md`.
+- Tidak ada evidence yang mengharuskan reopening workstream M5/WL2; batch ini hanya memperkuat karakterisasi operasional WO-017.

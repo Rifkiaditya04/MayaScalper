@@ -9,6 +9,8 @@
   - `docs/WO_022_FORWARD_RUNTIME_VALIDATION.md`
   - `docs/WO_022_FORWARD_RUNTIME_VALIDATION_REPORT.md`
   - `docs/WO_021_END_TO_END_RUNTIME_READINESS_VALIDATION.md`
+  - `docs/M5_CLOSE_SEMANTICS.md`
+  - `docs/WO_017_M5_READINESS_CHARACTERIZATION.md`
   - `docs/MA5_EXECUTION_EVIDENCE.md`
   - `docs/CONTEST_READINESS_CHECKLIST.md`
 
@@ -45,6 +47,7 @@ Implikasi:
 - tidak ada execution sample baru
 - failure terjadi pada market snapshot readiness sebelum trade lifecycle menghasilkan order
 - runtime berhenti sesuai kebijakan fail-loud
+- signature `69/71` konsisten dengan `docs/M5_CLOSE_SEMANTICS.md` dan recurrence yang sudah didokumentasikan di `docs/WO_017_M5_READINESS_CHARACTERIZATION.md`
 
 ---
 
@@ -114,6 +117,7 @@ Campaign WO-023 tidak menambah sampel MA5 execution baru.
 - tidak ada filled case baru
 - tidak ada rejected case baru
 - MA5 execution evidence tetap sama
+- campaign ini adalah evidence tambahan untuk readiness / snapshot behavior, bukan evidence baru untuk execution lifecycle
 
 ---
 

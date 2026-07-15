@@ -279,3 +279,4 @@ The available evidence is sufficient to show that the pipeline can produce both 
 - Execution outcome: no execution sample was produced in this campaign window
 - MA5 impact: no new filled or rejected MA5 case was added
 - Operational meaning: the campaign remained evidence for readiness / snapshot behavior, not for execution lifecycle
+- Context: the repeated `69/71` signature is already documented in `docs/M5_CLOSE_SEMANTICS.md` and `docs/WO_017_M5_READINESS_CHARACTERIZATION.md`

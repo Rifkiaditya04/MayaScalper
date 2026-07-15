@@ -20,6 +20,7 @@ Gunakan ID evidence yang konsisten agar review, daily log, dan checklist bisa di
 | EV-010 | 2026-07-02 to 2026-07-06 | deployment.market_data_readiness / runtime db | Validation Gates / WO-017 | VERIFIED | 21 recurrent M5 occurrences across GBPJPY/EURUSD; dominant pattern 69/71 closed bars |
 | EV-011 | 2026-07-15 | deployment.startup / runtime_started / runtime_cycle / broker_reconciliation | Runtime Reliability / Readiness | VERIFIED | post-PATCH-DR001A forward campaign; broker_reconciliation GREEN, missing_broker_count=0, ready_to_resume=true, one bounded cycle, no execution submitted |
 | EV-012 | 2026-07-15 | deployment.market_data_readiness / runtime_error / runtime_stopped | Validation Gates / WO-023 | VERIFIED | forward trading campaign stopped on M5 readiness; closed_bar_count=69, future_count=1, no execution sample |
+| EV-013 | 2026-07-15 | WO-023 8-run batch | Validation Gates / WO-023 | VERIFIED | recurrent M5 operational pattern; eight runs all stopped on closed_bar_count=69, future_count=1, no execution sample |
 
 ## Rules
 
