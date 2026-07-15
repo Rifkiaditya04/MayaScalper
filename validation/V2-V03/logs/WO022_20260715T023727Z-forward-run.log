@@ -1,0 +1,54 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260715093727
+Username: FORTUNE-LOOP\CodexSandboxOffline
+RunAs User: FORTUNE-LOOP\CodexSandboxOffline
+Configuration Name: 
+Machine: FORTUNE-LOOP (Microsoft Windows NT 10.0.22631.0)
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}
+$ErrorActionPreference = 'Stop'
+Set-Location 'D:\Maya\Scalper'
+$envMap = @{}
+Get-Content .env |
+  Where-Object { $_ -match '^[A-Za-z_][A-Za-z0-9_]*=' } |
+  ForEach-Object {
+    $k,$v = $_ -split '=',2
+    $envMap[$k] = $v.Trim()
+  }
+$env:TSP_V2_MT5_LOGIN = $envMap['TSP_MT5_LOGIN']
+$env:TSP_V2_MT5_PASSWORD = $envMap['TSP_MT5_PASSWORD']
+$env:TSP_V2_MT5_SERVER = $envMap['TSP_MT5_SERVER']
+$env:TSP_V2_MT5_TERMINAL_PATH = $envMap['TSP_MT5_TERMINAL_PATH']
+$py = 'D:\Maya\Pradita\Scripts\python.exe'
+$stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
+$logDir = 'validation\V2-V03\logs'
+$log = Join-Path $logDir "WO022_$stamp-forward-run.log"
+New-Item -ItemType Directory -Force $logDir | Out-Null
+Start-Transcript -Path $log -Force
+try {
+    & $py -m tsp_v2.run_v2 preflight --config deploy/v2/configs/forward_live.yaml --env-file .env
+    if ($LASTEXITCODE -ne 0) { throw "Preflight failed with exit code $LASTEXITCODE" }
+    & $py -m tsp_v2.run_v2 start --config deploy/v2/configs/forward_live.yaml --env-file .env --max-cycles 1
+    if ($LASTEXITCODE -ne 0) { throw "Start failed with exit code $LASTEXITCODE" }
+}
+finally {
+    Stop-Transcript | Out-Null
+}
+Write-Output "LOG=$log"
+Process ID: 1372
+PSVersion: 5.1.22621.2506
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.22621.2506
+BuildVersion: 10.0.22621.2506
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is validation\V2-V03\logs\WO022_20260715T023727Z-forward-run.log
+
+
+**********************
+Windows PowerShell transcript end
+End time: 20260715093728
+**********************
