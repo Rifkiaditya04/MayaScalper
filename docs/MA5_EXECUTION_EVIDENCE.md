@@ -269,3 +269,13 @@ This means the order lifecycle is auditable across:
 **MA5 execution lifecycle is evidenced, but the contest envelope remains incomplete.**
 
 The available evidence is sufficient to show that the pipeline can produce both filled and rejected outcomes and persist them correctly. It is not sufficient to claim that the latest build has exhausted the full execution envelope needed for contest readiness.
+
+---
+
+## Campaign Note - WO-023
+
+- Source: `validation/V2-V03/logs/WO023_20260715T033157Z-forward-run.log`
+- Runtime outcome: `ConfigValidationError: Not enough closed bars for timeframe M5: need at least 70`
+- Execution outcome: no execution sample was produced in this campaign window
+- MA5 impact: no new filled or rejected MA5 case was added
+- Operational meaning: the campaign remained evidence for readiness / snapshot behavior, not for execution lifecycle
