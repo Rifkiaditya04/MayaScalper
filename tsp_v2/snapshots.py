@@ -58,6 +58,7 @@ def build_market_snapshot(
     previous_cycle_time_utc: datetime | None = None,
     build_config: SnapshotBuildConfig | None = None,
     diagnostics_hook: Callable[[dict[str, Any]], None] | None = None,
+    timing_hook: Callable[[dict[str, Any]], None] | None = None,
 ) -> MarketSnapshot:
     if symbol.upper() not in config.symbols.allowlist:
         raise ConfigValidationError(f"Unsupported symbol for V2 runtime: {symbol}")
@@ -128,6 +129,39 @@ def build_market_snapshot(
             ),
         }
         return context
+
+    def build_snapshot_timing_payload(
+        *,
+        current_timeframe: str,
+        raw_bars: Sequence[dict[str, Any]],
+        closed_bars: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
+        latest_raw_bar = max(raw_bars, key=lambda bar: bar["close_time_utc"])
+        latest_closed_bar = max(closed_bars, key=lambda bar: bar["close_time_utc"]) if closed_bars else None
+        latest_closed_close_time = latest_closed_bar["close_time_utc"] if latest_closed_bar is not None else None
+        raw_stats = build_raw_bar_stats(raw_bars)
+        payload: dict[str, Any] = {
+            "stage": "snapshot_timing",
+            "symbol": symbol_name,
+            "timeframe": current_timeframe,
+            "cycle_time_utc": cycle_utc.isoformat(),
+            "broker_time_utc": cycle_utc.isoformat(),
+            "current_open_m5_open": latest_raw_bar["timestamp"].isoformat(),
+            "latest_closed_m5_close": (
+                latest_closed_close_time.isoformat() if latest_closed_close_time is not None else None
+            ),
+            "seconds_until_next_close": (
+                latest_raw_bar["close_time_utc"] - cycle_utc
+            ).total_seconds(),
+            "seconds_since_last_close": (
+                (cycle_utc - latest_closed_close_time).total_seconds()
+                if latest_closed_close_time is not None
+                else None
+            ),
+            "closed_bar_count": len(closed_bars),
+            "future_count": raw_stats["future_count"],
+        }
+        return payload
 
     def fetch_rates(timeframe: str, count: int) -> Sequence[Any]:
         try:
@@ -219,6 +253,14 @@ def build_market_snapshot(
         "M15": bars_m15_all,
         "H1": bars_h1_all,
     }
+    if timing_hook is not None:
+        timing_hook(
+            build_snapshot_timing_payload(
+                current_timeframe="M5",
+                raw_bars=bars_m5_all,
+                closed_bars=bars_m5,
+            )
+        )
     for timeframe, bars in (("M1", bars_m1), ("M5", bars_m5), ("M15", bars_m15), ("H1", bars_h1)):
         if len(bars) < minimum_counts[timeframe]:
             raw_bars = raw_bars_by_timeframe[timeframe]

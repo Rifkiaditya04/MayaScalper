@@ -358,6 +358,38 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(payload["m5_time_context"]["broker_time_minus_latest_raw_bar_seconds"], -300.0)
         self.assertEqual(payload["m5_time_context"]["broker_time_minus_latest_closed_bar_seconds"], 0.0)
 
+    def test_snapshot_emits_snapshot_timing_for_m5_window(self) -> None:
+        cycle_time = datetime(2026, 5, 26, 13, 10, 0, tzinfo=timezone.utc)
+        provider = M5OpenBarProvider(
+            tick_time=cycle_time + timedelta(minutes=5),
+            m1_last_time=cycle_time - timedelta(minutes=1),
+        )
+        timing: list[dict[str, object]] = []
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = self._load_config(Path(tmp_dir))
+            with self.assertRaises(ConfigValidationError):
+                build_market_snapshot(
+                    provider,
+                    config=config,
+                    symbol="XAUUSD",
+                    cycle_time_utc=cycle_time,
+                    build_config=SnapshotBuildConfig(m5_bars=70),
+                    timing_hook=timing.append,
+                )
+        self.assertTrue(timing)
+        payload = timing[-1]
+        self.assertEqual(payload["stage"], "snapshot_timing")
+        self.assertEqual(payload["symbol"], "XAUUSD")
+        self.assertEqual(payload["timeframe"], "M5")
+        self.assertEqual(payload["cycle_time_utc"], cycle_time.isoformat())
+        self.assertEqual(payload["broker_time_utc"], cycle_time.isoformat())
+        self.assertEqual(payload["current_open_m5_open"], "2026-05-26T13:15:00+00:00")
+        self.assertEqual(payload["latest_closed_m5_close"], "2026-05-26T13:10:00+00:00")
+        self.assertEqual(payload["seconds_until_next_close"], 600.0)
+        self.assertEqual(payload["seconds_since_last_close"], 0.0)
+        self.assertEqual(payload["closed_bar_count"], 68)
+        self.assertEqual(payload["future_count"], 1)
+
     def test_snapshot_emits_m1_raw_bar_dump_with_stats_when_m1_closed_bars_are_insufficient(self) -> None:
         cycle_time = datetime(2026, 5, 26, 13, 10, 0, tzinfo=timezone.utc)
         provider = M1FutureBarProvider(

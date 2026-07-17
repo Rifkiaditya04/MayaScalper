@@ -701,6 +701,7 @@ class DeploymentRuntime:
                     cycle_time_utc=broker_time,
                     previous_cycle_time_utc=None,
                     diagnostics_hook=diagnostics_hook,
+                    timing_hook=lambda payload: store.store_telemetry_index("deployment.snapshot_timing", payload),
                 )
             except ConfigValidationError as exc:
                 stage = str(last_diagnostics.get("stage")) if last_diagnostics is not None else ""

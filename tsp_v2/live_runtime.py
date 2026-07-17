@@ -281,6 +281,7 @@ class LiveRuntimeRunner:
                 cycle_time_utc=broker_time,
                 previous_cycle_time_utc=self.previous_cycle_time_utc,
                 diagnostics_hook=lambda payload: self._emit_telemetry("deployment.market_data_readiness", payload),
+                timing_hook=lambda payload: self._emit_telemetry("deployment.snapshot_timing", payload),
             )
             snapshots[symbol] = snapshot
 

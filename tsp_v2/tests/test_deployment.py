@@ -497,6 +497,7 @@ class DeploymentTests(unittest.TestCase):
                 previous_cycle_time_utc=None,
                 build_config=None,
                 diagnostics_hook=None,
+                timing_hook=None,
             ):
                 del provider, config, symbol, previous_cycle_time_utc, build_config
                 build_calls.append(cycle_time_utc)
@@ -512,8 +513,23 @@ class DeploymentTests(unittest.TestCase):
                         "minimum_closed_bar_count": 70,
                         "payload_health": "GREEN",
                     }
+                    timing_payload = {
+                        "stage": "snapshot_timing",
+                        "symbol": "XAUUSD",
+                        "timeframe": "M5",
+                        "cycle_time_utc": cycle_time_utc.isoformat(),
+                        "broker_time_utc": cycle_time_utc.isoformat(),
+                        "current_open_m5_open": "2026-05-29T08:55:00+00:00",
+                        "latest_closed_m5_close": "2026-05-29T08:55:00+00:00",
+                        "seconds_until_next_close": 300.0,
+                        "seconds_since_last_close": 0.0,
+                        "closed_bar_count": 70,
+                        "future_count": 1,
+                    }
                     if diagnostics_hook is not None:
                         diagnostics_hook(payload)
+                    if timing_hook is not None:
+                        timing_hook(timing_payload)
                     raise ConfigValidationError("Not enough closed bars for timeframe M5: need at least 70")
                 payload = {
                     "stage": "snapshot_ready",
@@ -524,8 +540,23 @@ class DeploymentTests(unittest.TestCase):
                     "closed_bar_count": {"M1": 40, "M5": 70, "M15": 40, "H1": 40},
                     "payload_health": "GREEN",
                 }
+                timing_payload = {
+                    "stage": "snapshot_timing",
+                    "symbol": "XAUUSD",
+                    "timeframe": "M5",
+                    "cycle_time_utc": cycle_time_utc.isoformat(),
+                    "broker_time_utc": cycle_time_utc.isoformat(),
+                    "current_open_m5_open": "2026-05-29T08:55:00+00:00",
+                    "latest_closed_m5_close": "2026-05-29T08:55:00+00:00",
+                    "seconds_until_next_close": 300.0,
+                    "seconds_since_last_close": 0.0,
+                    "closed_bar_count": 70,
+                    "future_count": 1,
+                }
                 if diagnostics_hook is not None:
                     diagnostics_hook(payload)
+                if timing_hook is not None:
+                    timing_hook(timing_payload)
                 return SimpleNamespace(cycle_time_utc=cycle_time_utc, bars_m5=())
 
             with (
@@ -559,7 +590,6 @@ class DeploymentTests(unittest.TestCase):
                 ORDER BY rowid ASC
                 """
             ).fetchall()
-            telemetry_db.close()
             self.assertGreaterEqual(len(rows), 2)
             first_payload = json.loads(rows[0]["payload_json"])
             last_payload = json.loads(rows[-1]["payload_json"])
@@ -567,6 +597,23 @@ class DeploymentTests(unittest.TestCase):
             self.assertFalse(first_payload["snapshot_ready"])
             self.assertEqual(last_payload["stage"], "snapshot_ready")
             self.assertTrue(last_payload["snapshot_ready"])
+            timing_rows = telemetry_db.execute(
+                """
+                SELECT payload_json
+                FROM telemetry_index
+                WHERE topic = 'deployment.snapshot_timing'
+                ORDER BY rowid ASC
+                """
+            ).fetchall()
+            self.assertGreaterEqual(len(timing_rows), 2)
+            timing_payload = json.loads(timing_rows[0]["payload_json"])
+            self.assertEqual(timing_payload["stage"], "snapshot_timing")
+            self.assertEqual(timing_payload["symbol"], "XAUUSD")
+            self.assertEqual(timing_payload["timeframe"], "M5")
+            self.assertEqual(timing_payload["closed_bar_count"], 70)
+            self.assertEqual(timing_payload["future_count"], 1)
+            self.assertEqual(timing_payload["seconds_until_next_close"], 300.0)
+            telemetry_db.close()
             shutdown = runtime.shutdown(
                 reason="test_complete",
                 current_time_utc=datetime(2026, 5, 29, 9, 1, 0, tzinfo=timezone.utc),
