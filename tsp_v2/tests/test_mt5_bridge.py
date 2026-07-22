@@ -375,6 +375,50 @@ class MT5BridgeTests(unittest.TestCase):
         self.assertEqual(tick["broker_time_offset_hours"], 0)
         self.assertLess(abs(tick["broker_delta_seconds_from_capture"]), 5.0)
 
+    def test_latest_tick_recovers_ipc_loss_before_rates_fallback(self) -> None:
+        class RecoveringTickFake(FakeMT5):
+            def symbol_info_tick(self, symbol):
+                del symbol
+                payload = {
+                    "bid": 2350.0,
+                    "ask": 2350.2,
+                    "last": 2350.1,
+                    "volume": 1234,
+                }
+                if len(self.initialize_calls) == 0:
+                    self._last_error = (-10004, "No IPC connection")
+                    return SimpleNamespace(**payload)
+                self._last_error = (0, "")
+                payload["time"] = self._rates_time
+                return SimpleNamespace(**payload)
+
+        fake = RecoveringTickFake(tick_time_missing=True, rates_time=datetime(2026, 5, 29, 9, 0, tzinfo=timezone.utc))
+        fake._ipc_loss_requires_reconnect = True
+        bridge = MT5Bridge(
+            terminal_path=Path(r"C:\MT5\terminal64.exe"),
+            login="123456",
+            password="secret",
+            server="Demo-Server",
+            mt5_module=fake,
+        )
+
+        tick = bridge.get_latest_tick("XAUUSD")
+
+        self.assertEqual(tick["symbol"], "XAUUSD")
+        self.assertIsNotNone(tick["time"].tzinfo)
+        self.assertEqual(tick["source_time_fallback"], "ipc_recovery_tick")
+        self.assertGreaterEqual(fake.initialize_calls.__len__(), 1)
+        self.assertTrue(bridge.recovery_fully_usable)
+        self.assertTrue(bridge.market_data_probe_attempted)
+        self.assertTrue(bridge.market_data_usable)
+        self.assertIsNotNone(bridge.last_latest_tick_probe)
+        self.assertTrue(bridge.last_latest_tick_probe["ipc_recovery_attempted"])
+        self.assertTrue(bridge.last_latest_tick_probe["ipc_recovery_ok"])
+        self.assertTrue(bridge.last_latest_tick_probe["ipc_recovery_succeeded"])
+        self.assertTrue(bridge.last_latest_tick_probe["tick_time_retry_after_ipc_recovery_used"])
+        self.assertTrue(bridge.last_latest_tick_probe["tick_time_retry_after_ipc_recovery_succeeded"])
+        self.assertFalse(bridge.last_latest_tick_probe["rates_fallback_used"])
+
     def test_get_rates_recovers_once_from_ipc_loss(self) -> None:
         fake = FakeMT5()
         fake._ipc_loss_requires_reconnect = True

@@ -11,7 +11,7 @@ import unittest
 from tsp_v2.config import load_config
 from tsp_v2.config_schema import ConfigValidationError
 from tsp_v2.enums import HealthState, SessionName
-from tsp_v2.snapshots import SnapshotBuildConfig, build_market_snapshot
+from tsp_v2.snapshots import SnapshotBuildConfig, _classify_m5_boundary_phase, build_market_snapshot
 
 
 BASE_TEMPLATE = """
@@ -383,12 +383,50 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(payload["timeframe"], "M5")
         self.assertEqual(payload["cycle_time_utc"], cycle_time.isoformat())
         self.assertEqual(payload["broker_time_utc"], cycle_time.isoformat())
+        self.assertEqual(payload["raw_first_bar_timestamp"], "2026-05-26T07:30:00+00:00")
+        self.assertEqual(payload["raw_last_bar_timestamp"], "2026-05-26T13:15:00+00:00")
+        self.assertEqual(payload["raw_first_bar_close_time_utc"], "2026-05-26T07:35:00+00:00")
+        self.assertEqual(payload["raw_last_bar_close_time_utc"], "2026-05-26T13:20:00+00:00")
+        self.assertEqual(payload["closed_first_bar_timestamp"], "2026-05-26T07:30:00+00:00")
+        self.assertEqual(payload["closed_last_bar_timestamp"], "2026-05-26T13:05:00+00:00")
         self.assertEqual(payload["current_open_m5_open"], "2026-05-26T13:15:00+00:00")
+        self.assertEqual(payload["current_open_m5_close"], "2026-05-26T13:20:00+00:00")
         self.assertEqual(payload["latest_closed_m5_close"], "2026-05-26T13:10:00+00:00")
         self.assertEqual(payload["seconds_until_next_close"], 600.0)
         self.assertEqual(payload["seconds_since_last_close"], 0.0)
+        self.assertEqual(payload["m5_boundary_phase"], "MID_CANDLE")
+        self.assertEqual(payload["raw_bar_count"], 70)
         self.assertEqual(payload["closed_bar_count"], 68)
         self.assertEqual(payload["future_count"], 1)
+
+    def test_m5_boundary_phase_classification_is_deterministic(self) -> None:
+        cycle_time = datetime(2026, 5, 26, 13, 14, 0, tzinfo=timezone.utc)
+        current_open = datetime(2026, 5, 26, 13, 10, 0, tzinfo=timezone.utc)
+        current_close = datetime(2026, 5, 26, 13, 15, 0, tzinfo=timezone.utc)
+        self.assertEqual(
+            _classify_m5_boundary_phase(
+                cycle_time_utc=cycle_time,
+                current_open_m5_open=current_open,
+                current_open_m5_close=current_close,
+            ),
+            "NEAR_CLOSE",
+        )
+        self.assertEqual(
+            _classify_m5_boundary_phase(
+                cycle_time_utc=current_close,
+                current_open_m5_open=current_open,
+                current_open_m5_close=current_close,
+            ),
+            "POST_CLOSE",
+        )
+        self.assertEqual(
+            _classify_m5_boundary_phase(
+                cycle_time_utc=datetime(2026, 5, 26, 13, 11, 0, tzinfo=timezone.utc),
+                current_open_m5_open=current_open,
+                current_open_m5_close=current_close,
+            ),
+            "MID_CANDLE",
+        )
 
     def test_snapshot_emits_m1_raw_bar_dump_with_stats_when_m1_closed_bars_are_insufficient(self) -> None:
         cycle_time = datetime(2026, 5, 26, 13, 10, 0, tzinfo=timezone.utc)

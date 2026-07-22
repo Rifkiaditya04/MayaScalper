@@ -492,7 +492,14 @@ class MT5Bridge:
             "tick_time_retry_used": False,
             "stream_used": False,
             "stream_tick_found": False,
+            "ipc_recovery_attempted": False,
+            "ipc_recovery_ok": False,
+            "ipc_recovery_succeeded": False,
+            "tick_time_retry_after_ipc_recovery_used": False,
+            "tick_time_retry_after_ipc_recovery_succeeded": False,
             "rates_fallback_used": False,
+            "rates_fallback_attempted": False,
+            "rates_fallback_succeeded": False,
             "tick_time_fallback_used": False,
             "tick_time_fallback_source": None,
             "final_time_source": None,
@@ -561,50 +568,74 @@ class MT5Bridge:
                 probe["final_time_source"] = "ticks_stream"
             else:
                 probe["stream_tick_found"] = False
-                probe["rates_fallback_used"] = True
-                probe["tick_time_fallback_used"] = True
-                probe["tick_time_fallback_source"] = "rates_m1"
-                probe["final_time_source"] = "rates_m1"
-                try:
-                    fallback_rates = self.get_rates(symbol_name, "M1", 1)
-                except MT5BridgeError as exc:
-                    probe.update(
-                        {
-                            "failure_stage": "rates_fallback",
-                            "failure_reason": exc.status.message,
-                            "rates_error_message": exc.status.message,
-                            "rates_error_failure_class": exc.status.failure_class,
-                            "rates_error_response_class": exc.status.response_class,
-                            "rates_error_retryable": exc.status.retryable,
-                            "rates_error_fatal": exc.status.fatal,
-                        }
-                    )
-                    self.last_latest_tick_probe = _json_ready(probe)
-                    exc.status.diagnostics.setdefault("latest_tick_probe", _json_ready(probe))
-                    raise
-                if not fallback_rates:
-                    probe.update(
-                        {
-                            "failure_stage": "rates_fallback",
-                            "failure_reason": f"Unable to resolve latest tick timestamp for {symbol_name}",
-                        }
-                    )
-                    self.last_latest_tick_probe = _json_ready(probe)
-                    raise MT5BridgeError(
-                        self._bridge_error_status(
-                            mt5,
-                            failure_class="SYMBOL_UNAVAILABLE",
-                            response_class=RESPONSE_DEGRADE_SYMBOL,
-                            fatal=False,
-                            message=f"Unable to resolve latest tick timestamp for {symbol_name}",
-                            diagnostics={"symbol": symbol_name, "fallback": "rates_m1", "latest_tick_probe": _json_ready(probe)},
+                if not self._market_data_probe_in_progress:
+                    probe["ipc_recovery_attempted"] = True
+                    probe["ipc_recovery_ok"] = self._recover_ipc_connection(mt5, symbol_name)
+                    probe["ipc_recovery_succeeded"] = probe["ipc_recovery_ok"]
+                    if probe["ipc_recovery_ok"]:
+                        recovered_tick = _record_to_dict(_safe_call(mt5, "symbol_info_tick", symbol_name, default=None))
+                        probe["tick_time_retry_after_ipc_recovery_used"] = True
+                        probe["tick_time_retry_count"] += 1
+                        if recovered_tick is not None and _record_tick_time_value(recovered_tick) is not None:
+                            tick = dict(recovered_tick)
+                            tick["source_time_fallback"] = "ipc_recovery_tick"
+                            tick["source_time_fallback_raw_type"] = type(recovered_tick).__name__
+                            probe["tick_time_retry_after_ipc_recovery_succeeded"] = True
+                            probe["tick_time_fallback_used"] = True
+                            probe["tick_time_fallback_source"] = "ipc_recovery_tick"
+                            probe["final_time_source"] = "symbol_info_tick_after_ipc_recovery"
+                            probe["raw_time_value"] = _json_ready(_record_tick_time_value(tick))
+                            probe["raw_time_msc_value"] = _json_ready(tick.get("time_msc"))
+                            probe["timestamp_valid"] = True
+                if _record_tick_time_value(tick) is None:
+                    probe["rates_fallback_used"] = True
+                    probe["rates_fallback_attempted"] = True
+                    probe["tick_time_fallback_used"] = True
+                    probe["tick_time_fallback_source"] = "rates_m1"
+                    probe["final_time_source"] = "rates_m1"
+                    try:
+                        fallback_rates = self.get_rates(symbol_name, "M1", 1)
+                    except MT5BridgeError as exc:
+                        probe.update(
+                            {
+                                "rates_fallback_succeeded": False,
+                                "failure_stage": "rates_fallback",
+                                "failure_reason": exc.status.message,
+                                "rates_error_message": exc.status.message,
+                                "rates_error_failure_class": exc.status.failure_class,
+                                "rates_error_response_class": exc.status.response_class,
+                                "rates_error_retryable": exc.status.retryable,
+                                "rates_error_fatal": exc.status.fatal,
+                            }
                         )
-                    )
-                tick = dict(tick)
-                fallback_timestamp = fallback_rates[-1]["timestamp"]
-                tick["time"] = fallback_timestamp
-                tick["time_msc"] = int(fallback_timestamp.timestamp() * 1000)
-                tick["source_time_fallback"] = "rates_m1"
+                        self.last_latest_tick_probe = _json_ready(probe)
+                        exc.status.diagnostics.setdefault("latest_tick_probe", _json_ready(probe))
+                        raise
+                    if not fallback_rates:
+                        probe.update(
+                            {
+                                "rates_fallback_succeeded": False,
+                                "failure_stage": "rates_fallback",
+                                "failure_reason": f"Unable to resolve latest tick timestamp for {symbol_name}",
+                            }
+                        )
+                        self.last_latest_tick_probe = _json_ready(probe)
+                        raise MT5BridgeError(
+                            self._bridge_error_status(
+                                mt5,
+                                failure_class="SYMBOL_UNAVAILABLE",
+                                response_class=RESPONSE_DEGRADE_SYMBOL,
+                                fatal=False,
+                                message=f"Unable to resolve latest tick timestamp for {symbol_name}",
+                                diagnostics={"symbol": symbol_name, "fallback": "rates_m1", "latest_tick_probe": _json_ready(probe)},
+                            )
+                        )
+                    probe["rates_fallback_succeeded"] = True
+                    tick = dict(tick)
+                    fallback_timestamp = fallback_rates[-1]["timestamp"]
+                    tick["time"] = fallback_timestamp
+                    tick["time_msc"] = int(fallback_timestamp.timestamp() * 1000)
+                    tick["source_time_fallback"] = "rates_m1"
         else:
             probe["final_time_source"] = "symbol_info_tick"
             if tick_time_retry_count > 0:

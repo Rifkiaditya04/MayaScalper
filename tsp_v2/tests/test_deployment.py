@@ -613,6 +613,19 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(timing_payload["closed_bar_count"], 70)
             self.assertEqual(timing_payload["future_count"], 1)
             self.assertEqual(timing_payload["seconds_until_next_close"], 300.0)
+            runner_start_rows = telemetry_db.execute(
+                """
+                SELECT payload_json
+                FROM telemetry_index
+                WHERE topic = 'deployment.runner_start'
+                ORDER BY rowid ASC
+                """
+            ).fetchall()
+            self.assertEqual(len(runner_start_rows), 1)
+            runner_start_payload = json.loads(runner_start_rows[0]["payload_json"])
+            self.assertEqual(runner_start_payload["primary_symbol"], "XAUUSD")
+            self.assertTrue(runner_start_payload["ready_to_resume"])
+            self.assertEqual(runner_start_payload["broker_reconciliation"], "GREEN")
             telemetry_db.close()
             shutdown = runtime.shutdown(
                 reason="test_complete",

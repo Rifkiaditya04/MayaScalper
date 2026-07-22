@@ -138,26 +138,49 @@ def build_market_snapshot(
     ) -> dict[str, Any]:
         latest_raw_bar = max(raw_bars, key=lambda bar: bar["close_time_utc"])
         latest_closed_bar = max(closed_bars, key=lambda bar: bar["close_time_utc"]) if closed_bars else None
+        raw_first_bar = min(raw_bars, key=lambda bar: bar["timestamp"])
+        raw_last_bar = max(raw_bars, key=lambda bar: bar["timestamp"])
+        closed_first_bar = min(closed_bars, key=lambda bar: bar["timestamp"]) if closed_bars else None
+        closed_last_bar = max(closed_bars, key=lambda bar: bar["timestamp"]) if closed_bars else None
         latest_closed_close_time = latest_closed_bar["close_time_utc"] if latest_closed_bar is not None else None
         raw_stats = build_raw_bar_stats(raw_bars)
+        current_open_m5_open = latest_raw_bar["timestamp"]
+        current_open_m5_close = latest_raw_bar["close_time_utc"]
         payload: dict[str, Any] = {
             "stage": "snapshot_timing",
             "symbol": symbol_name,
             "timeframe": current_timeframe,
             "cycle_time_utc": cycle_utc.isoformat(),
             "broker_time_utc": cycle_utc.isoformat(),
-            "current_open_m5_open": latest_raw_bar["timestamp"].isoformat(),
+            "raw_first_bar_timestamp": raw_first_bar["timestamp"].isoformat(),
+            "raw_last_bar_timestamp": raw_last_bar["timestamp"].isoformat(),
+            "raw_first_bar_close_time_utc": raw_first_bar["close_time_utc"].isoformat(),
+            "raw_last_bar_close_time_utc": raw_last_bar["close_time_utc"].isoformat(),
+            "closed_first_bar_timestamp": (
+                closed_first_bar["timestamp"].isoformat() if closed_first_bar is not None else None
+            ),
+            "closed_last_bar_timestamp": (
+                closed_last_bar["timestamp"].isoformat() if closed_last_bar is not None else None
+            ),
+            "current_open_m5_open": current_open_m5_open.isoformat(),
+            "current_open_m5_close": current_open_m5_close.isoformat(),
             "latest_closed_m5_close": (
                 latest_closed_close_time.isoformat() if latest_closed_close_time is not None else None
             ),
             "seconds_until_next_close": (
-                latest_raw_bar["close_time_utc"] - cycle_utc
+                current_open_m5_close - cycle_utc
             ).total_seconds(),
             "seconds_since_last_close": (
                 (cycle_utc - latest_closed_close_time).total_seconds()
                 if latest_closed_close_time is not None
                 else None
             ),
+            "m5_boundary_phase": _classify_m5_boundary_phase(
+                cycle_time_utc=cycle_utc,
+                current_open_m5_open=current_open_m5_open,
+                current_open_m5_close=current_open_m5_close,
+            ),
+            "raw_bar_count": len(raw_bars),
             "closed_bar_count": len(closed_bars),
             "future_count": raw_stats["future_count"],
         }
@@ -530,6 +553,22 @@ def _closed_bars(
     cycle_time_utc: datetime,
 ) -> list[dict[str, Any]]:
     return [bar for bar in bars if bar["close_time_utc"] <= cycle_time_utc]
+
+
+def _classify_m5_boundary_phase(
+    *,
+    cycle_time_utc: datetime,
+    current_open_m5_open: datetime,
+    current_open_m5_close: datetime,
+) -> str:
+    if cycle_time_utc >= current_open_m5_close:
+        return "POST_CLOSE"
+    if cycle_time_utc < current_open_m5_open:
+        return "MID_CANDLE"
+    seconds_until_next_close = (current_open_m5_close - cycle_time_utc).total_seconds()
+    if seconds_until_next_close <= 120.0:
+        return "NEAR_CLOSE"
+    return "MID_CANDLE"
 
 
 def _classify_feed_health(

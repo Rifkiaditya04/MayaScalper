@@ -500,6 +500,22 @@ class DeploymentRuntime:
             if not dry_run and not bootstrap_report.ready_to_resume:
                 raise ConfigValidationError("Broker reconciliation is not ready to resume live runtime")
             if not dry_run:
+                store.store_telemetry_index(
+                    "deployment.runner_start",
+                    {
+                        "event_time_utc": startup_time_utc.isoformat(),
+                        "mode": metadata.mode,
+                        "profile": metadata.profile,
+                        "primary_symbol": self._primary_symbol(),
+                        "ready_to_resume": bool(bootstrap_report.ready_to_resume),
+                        "broker_reconciliation": "GREEN" if bootstrap_report.ready_to_resume else "RED",
+                        "reconciled_count": bootstrap_report.reconciliation_report.reconciled_count,
+                        "filled_count": bootstrap_report.reconciliation_report.filled_count,
+                        "rejected_count": bootstrap_report.reconciliation_report.rejected_count,
+                        "expired_count": bootstrap_report.reconciliation_report.expired_count,
+                        "unresolved_setup_ids": list(bootstrap_report.unresolved_setup_ids),
+                    },
+                )
                 runner = LiveRuntimeRunner(
                     config=self.config,
                     store=store,

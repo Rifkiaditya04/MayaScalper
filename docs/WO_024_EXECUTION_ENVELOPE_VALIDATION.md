@@ -52,6 +52,17 @@ The execution envelope was not reached on the current baseline because each gove
 
 This is evidence of runtime behavior on the current baseline, not a change to the M5 contract.
 
+## Post-telemetry Patch Validation
+
+A post-patch forward campaign was also run after `deployment.snapshot_timing` and `deployment.runner_start` were added.
+
+- Transcript: `validation/V2-V03/logs/WO024_POSTPATCH_20260717T092943Z-forward-run.log`
+- The campaign reached startup preflight and startup readiness probing.
+- The campaign stopped before `runtime_started`.
+- The first runtime-facing failure was `MT5BridgeError: Unable to fetch rates for GBPUSD M1`.
+- No `deployment.snapshot_timing` event was emitted for this run.
+- No `deployment.runner_start` event was emitted for this run.
+
 ## Freeze
 
 No additional WO-024 campaigns are required unless one of the following changes:
@@ -61,4 +72,3 @@ No additional WO-024 campaigns are required unless one of the following changes:
 - execution policy
 - build fingerprint
 - broker truth or market snapshot conditions
-

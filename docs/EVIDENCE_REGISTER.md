@@ -22,6 +22,7 @@ Gunakan ID evidence yang konsisten agar review, daily log, dan checklist bisa di
 | EV-012 | 2026-07-15 | deployment.market_data_readiness / runtime_error / runtime_stopped | Validation Gates / WO-023 | VERIFIED | forward trading campaign stopped on M5 readiness; closed_bar_count=69, future_count=1, no execution sample |
 | EV-013 | 2026-07-15 | WO-023 8-run batch | Validation Gates / WO-023 | VERIFIED | recurrent M5 operational pattern; eight runs all stopped on closed_bar_count=69, future_count=1, no execution sample |
 | EV-014 | 2026-07-17 | WO-024 4-run batch | Execution Envelope | VERIFIED | four governed forward runs on the current baseline; identical M5 readiness signature, execution_count=0, no execution sample |
+| EV-015 | 2026-07-17 | deployment.preflight / deployment.market_data_probe | Runtime Reliability / Startup | VERIFIED | post-telemetry patch validation; startup stopped before runtime_started with MT5BridgeError on GBPUSD M1, no deployment.snapshot_timing emitted |
 
 ## Rules
 
