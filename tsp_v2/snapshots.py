@@ -143,6 +143,7 @@ def build_market_snapshot(
         closed_first_bar = min(closed_bars, key=lambda bar: bar["timestamp"]) if closed_bars else None
         closed_last_bar = max(closed_bars, key=lambda bar: bar["timestamp"]) if closed_bars else None
         latest_closed_close_time = latest_closed_bar["close_time_utc"] if latest_closed_bar is not None else None
+        fetch_meta = raw_bars[-1] if raw_bars else {}
         raw_stats = build_raw_bar_stats(raw_bars)
         current_open_m5_open = latest_raw_bar["timestamp"]
         current_open_m5_close = latest_raw_bar["close_time_utc"]
@@ -167,6 +168,13 @@ def build_market_snapshot(
             "latest_closed_m5_close": (
                 latest_closed_close_time.isoformat() if latest_closed_close_time is not None else None
             ),
+            "fetch_method": fetch_meta.get("fetch_method"),
+            "requested_start_utc": fetch_meta.get("requested_start_utc"),
+            "requested_end_utc": fetch_meta.get("requested_end_utc"),
+            "requested_count": fetch_meta.get("requested_count"),
+            "returned_count": fetch_meta.get("returned_count"),
+            "fetch_window_minutes": fetch_meta.get("fetch_window_minutes"),
+            "fetch_reference_time_utc": fetch_meta.get("fetch_reference_time_utc"),
             "seconds_until_next_close": (
                 current_open_m5_close - cycle_utc
             ).total_seconds(),
@@ -188,7 +196,12 @@ def build_market_snapshot(
 
     def fetch_rates(timeframe: str, count: int) -> Sequence[Any]:
         try:
-            return provider.get_rates(symbol, timeframe, count)
+            return provider.get_rates(
+                symbol,
+                timeframe,
+                count,
+                cycle_time_utc=cycle_utc,
+            )
         except Exception as exc:
             diagnostics = getattr(getattr(exc, "status", None), "diagnostics", {}) or {}
             emit_diagnostics(

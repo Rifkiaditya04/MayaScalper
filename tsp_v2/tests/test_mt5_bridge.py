@@ -43,6 +43,7 @@ class FakeMT5:
         tick_time_missing: bool = False,
         rates_time: datetime | None = None,
         rates_failures: int = 0,
+        range_failures: int = 0,
         post_reconnect_rate_failures: int = 0,
         post_reconnect_last_error: tuple[int, str] | None = None,
     ) -> None:
@@ -55,6 +56,8 @@ class FakeMT5:
         self._last_error = (0, "")
         self._visible_symbols = set()
         self._ipc_loss_requires_reconnect = False
+        self.pos_calls: list[dict[str, object]] = []
+        self.range_calls: list[dict[str, object]] = []
         self._post_reconnect_rate_failures_remaining = max(0, int(post_reconnect_rate_failures))
         self._post_reconnect_last_error = post_reconnect_last_error
         self._account_info = SimpleNamespace(
@@ -69,6 +72,7 @@ class FakeMT5:
         self._tick_time = None if tick_time_missing else (tick_time or datetime(2026, 5, 29, 10, 0, tzinfo=timezone.utc))
         self._rates_time = rates_time or datetime(2026, 5, 29, 9, 0, tzinfo=timezone.utc)
         self._rates_failures_remaining = max(0, int(rates_failures))
+        self._range_failures_remaining = max(0, int(range_failures))
         self._positions = (
             SimpleNamespace(
                 ticket=10,
@@ -160,6 +164,14 @@ class FakeMT5:
         )
 
     def copy_rates_from_pos(self, symbol, timeframe, start_pos, count):
+        self.pos_calls.append(
+            {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "start_pos": start_pos,
+                "count": count,
+            }
+        )
         del symbol, timeframe, start_pos
         if self._ipc_loss_requires_reconnect and len(self.initialize_calls) < 2:
             self._last_error = (-10004, "No IPC connection")
@@ -185,6 +197,49 @@ class FakeMT5:
             )
             for i in range(count)
         ]
+
+    def copy_rates_range(self, symbol, timeframe, date_from, date_to):
+        self.range_calls.append(
+            {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "date_from": date_from,
+                "date_to": date_to,
+            }
+        )
+        if self._ipc_loss_requires_reconnect and len(self.initialize_calls) < 2:
+            self._last_error = (-10004, "No IPC connection")
+            return ()
+        if self._ipc_loss_requires_reconnect and len(self.initialize_calls) >= 2 and self._post_reconnect_rate_failures_remaining > 0:
+            self._post_reconnect_rate_failures_remaining -= 1
+            if self._post_reconnect_last_error is not None:
+                self._last_error = self._post_reconnect_last_error
+            return ()
+        if self._range_failures_remaining > 0:
+            self._range_failures_remaining -= 1
+            return ()
+        if date_to < date_from:
+            return ()
+        timeframe_key = str(timeframe).upper()
+        step_minutes = {"M1": 1, "M5": 5, "M15": 15, "H1": 60}[timeframe_key]
+        current = date_from
+        records: list[SimpleNamespace] = []
+        index = 0
+        while current <= date_to:
+            records.append(
+                SimpleNamespace(
+                    time=int(current.timestamp()),
+                    open=100.0 + index,
+                    high=100.5 + index,
+                    low=99.5 + index,
+                    close=100.2 + index,
+                    tick_volume=100 + index,
+                    real_volume=50 + index,
+                )
+            )
+            current += timedelta(minutes=step_minutes)
+            index += 1
+        return records
 
     def positions_get(self, symbol=None, ticket=None):
         records = self._positions
@@ -443,6 +498,57 @@ class MT5BridgeTests(unittest.TestCase):
         self.assertIsNone(bridge.market_data_probe_error)
         self.assertEqual(fake.last_error(), (0, ""))
 
+    def test_get_rates_uses_copy_rates_range_when_cycle_time_is_provided(self) -> None:
+        fake = FakeMT5()
+        bridge = MT5Bridge(
+            terminal_path=Path(r"C:\MT5\terminal64.exe"),
+            login="123456",
+            password="secret",
+            server="Demo-Server",
+            mt5_module=fake,
+        )
+        bridge.connect()
+
+        cycle_time = datetime(2026, 7, 23, 12, 0, 0, tzinfo=timezone.utc)
+        rates = bridge.get_rates("GBPJPY", "M1", 40, cycle_time_utc=cycle_time)
+
+        expected_start = cycle_time - timedelta(minutes=42)
+        self.assertEqual(len(rates), 40)
+        self.assertEqual(len(fake.range_calls), 1)
+        self.assertEqual(fake.pos_calls, [])
+        self.assertEqual(fake.range_calls[0]["symbol"], "GBPJPY")
+        self.assertEqual(fake.range_calls[0]["timeframe"], "M1")
+        self.assertEqual(fake.range_calls[0]["date_from"], expected_start)
+        self.assertEqual(fake.range_calls[0]["date_to"], cycle_time)
+        self.assertEqual(rates[-1]["fetch_method"], "copy_rates_range")
+        self.assertEqual(rates[-1]["requested_start_utc"], expected_start.isoformat())
+        self.assertEqual(rates[-1]["requested_end_utc"], cycle_time.isoformat())
+        self.assertEqual(rates[-1]["requested_count"], 40)
+        self.assertEqual(rates[-1]["effective_count"], 40)
+        self.assertGreaterEqual(rates[-1]["returned_count"], 40)
+        self.assertIsNotNone(rates[-1]["timestamp"].tzinfo)
+
+    def test_get_rates_legacy_path_retains_copy_rates_from_pos_without_cycle_time(self) -> None:
+        fake = FakeMT5()
+        bridge = MT5Bridge(
+            terminal_path=Path(r"C:\MT5\terminal64.exe"),
+            login="123456",
+            password="secret",
+            server="Demo-Server",
+            mt5_module=fake,
+        )
+        bridge.connect()
+
+        rates = bridge.get_rates("GBPJPY", "M1", 3)
+
+        self.assertEqual(len(rates), 3)
+        self.assertEqual(len(fake.pos_calls), 1)
+        self.assertEqual(fake.range_calls, [])
+        self.assertEqual(fake.pos_calls[0]["symbol"], "GBPJPY")
+        self.assertEqual(fake.pos_calls[0]["timeframe"], "M1")
+        self.assertEqual(fake.pos_calls[0]["count"], 3)
+        self.assertEqual(rates[-1]["fetch_method"], "copy_rates_from_pos")
+
     def test_get_rates_fails_recovery_when_probe_fails_after_connect(self) -> None:
         fake = FakeMT5(
             tick_time_missing=True,
@@ -474,6 +580,31 @@ class MT5BridgeTests(unittest.TestCase):
         self.assertFalse(diagnostics["recovery_fully_usable"])
         self.assertIsInstance(diagnostics["market_data_probe_error"], dict)
         self.assertEqual(diagnostics["market_data_probe_error"]["failure_class"], "CONTRACT_QUERY_FAILURE")
+
+    def test_get_rates_explicit_range_does_not_fallback_to_copy_rates_from_pos_on_empty_response(self) -> None:
+        fake = FakeMT5(range_failures=20)
+        bridge = MT5Bridge(
+            terminal_path=Path(r"C:\MT5\terminal64.exe"),
+            login="123456",
+            password="secret",
+            server="Demo-Server",
+            mt5_module=fake,
+        )
+        bridge.connect()
+
+        cycle_time = datetime(2026, 7, 23, 12, 0, 0, tzinfo=timezone.utc)
+
+        with self.assertRaises(Exception) as ctx:
+            bridge.get_rates("GBPJPY", "M1", 40, cycle_time_utc=cycle_time)
+
+        status = getattr(ctx.exception, "status", None)
+        self.assertIsNotNone(status)
+        diagnostics = status.diagnostics
+        self.assertEqual(diagnostics["fetch_method"], "copy_rates_range")
+        self.assertEqual(diagnostics["requested_start_utc"], (cycle_time - timedelta(minutes=42)).isoformat())
+        self.assertEqual(diagnostics["requested_end_utc"], cycle_time.isoformat())
+        self.assertGreater(len(fake.range_calls), 0)
+        self.assertEqual(fake.pos_calls, [])
 
     def test_recover_ipc_connection_fails_when_connect_fails(self) -> None:
         fake = FakeMT5()

@@ -73,6 +73,7 @@ class FakeMarketProvider:
     def __init__(self, *, tick_time: datetime, m1_last_time: datetime) -> None:
         self._tick_time = tick_time
         self._m1_last_time = m1_last_time
+        self.last_cycle_time_utc: datetime | None = None
 
     def get_broker_time(self) -> datetime:
         return self._tick_time
@@ -85,8 +86,15 @@ class FakeMarketProvider:
             "ask": 2350.5,
         }
 
-    def get_rates(self, symbol: str, timeframe: str, count: int) -> list[dict[str, object]]:
+    def get_rates(
+        self,
+        symbol: str,
+        timeframe: str,
+        count: int,
+        cycle_time_utc: datetime | None = None,
+    ) -> list[dict[str, object]]:
         del symbol
+        self.last_cycle_time_utc = cycle_time_utc
         step = {"M1": 1, "M5": 5, "M15": 15, "H1": 60}[timeframe]
         anchor = {
             "M1": self._m1_last_time,
@@ -132,15 +140,27 @@ class ThinMarketProvider(FakeMarketProvider):
         super().__init__(**kwargs)
         self._m5_shortfall = m5_shortfall
 
-    def get_rates(self, symbol: str, timeframe: str, count: int) -> list[dict[str, object]]:
-        rates = super().get_rates(symbol, timeframe, count)
+    def get_rates(
+        self,
+        symbol: str,
+        timeframe: str,
+        count: int,
+        cycle_time_utc: datetime | None = None,
+    ) -> list[dict[str, object]]:
+        rates = super().get_rates(symbol, timeframe, count, cycle_time_utc=cycle_time_utc)
         if timeframe == "M5" and self._m5_shortfall > 0:
             return rates[: max(0, len(rates) - self._m5_shortfall)]
         return rates
 
 
 class M5OpenBarProvider(FakeMarketProvider):
-    def get_rates(self, symbol: str, timeframe: str, count: int) -> list[dict[str, object]]:
+    def get_rates(
+        self,
+        symbol: str,
+        timeframe: str,
+        count: int,
+        cycle_time_utc: datetime | None = None,
+    ) -> list[dict[str, object]]:
         del symbol
         step = {"M1": 1, "M5": 5, "M15": 15, "H1": 60}[timeframe]
         if timeframe == "M5":
@@ -168,9 +188,15 @@ class M5OpenBarProvider(FakeMarketProvider):
 
 
 class M1FutureBarProvider(FakeMarketProvider):
-    def get_rates(self, symbol: str, timeframe: str, count: int) -> list[dict[str, object]]:
+    def get_rates(
+        self,
+        symbol: str,
+        timeframe: str,
+        count: int,
+        cycle_time_utc: datetime | None = None,
+    ) -> list[dict[str, object]]:
         if timeframe != "M1":
-            return super().get_rates(symbol, timeframe, count)
+            return super().get_rates(symbol, timeframe, count, cycle_time_utc=cycle_time_utc)
         del symbol
         step = 1
         last_time = self._tick_time + timedelta(minutes=2)
@@ -225,6 +251,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertTrue(diagnostics)
         self.assertEqual(diagnostics[-1]["stage"], "snapshot_ready")
         self.assertEqual(diagnostics[-1]["symbol"], "XAUUSD")
+        self.assertEqual(provider.last_cycle_time_utc, cycle_time)
         self.assertEqual(diagnostics[-1]["returned_bars"]["M1"], 40)
         self.assertEqual(diagnostics[-1]["closed_bar_count"]["M1"], 40)
 
@@ -254,10 +281,16 @@ class SnapshotTests(unittest.TestCase):
 
     def test_snapshot_emits_rates_fetch_failure_diagnostics(self) -> None:
         class BrokenRatesProvider(FakeMarketProvider):
-            def get_rates(self, symbol: str, timeframe: str, count: int) -> list[dict[str, object]]:
+            def get_rates(
+                self,
+                symbol: str,
+                timeframe: str,
+                count: int,
+                cycle_time_utc: datetime | None = None,
+            ) -> list[dict[str, object]]:
                 if timeframe == "M1":
                     raise RuntimeError("simulated rates fetch failure")
-                return super().get_rates(symbol, timeframe, count)
+                return super().get_rates(symbol, timeframe, count, cycle_time_utc=cycle_time_utc)
 
         cycle_time = datetime(2026, 5, 26, 13, 10, 0, tzinfo=timezone.utc)
         provider = BrokenRatesProvider(

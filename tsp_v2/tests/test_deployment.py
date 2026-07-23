@@ -216,7 +216,13 @@ class FakeLiveBridge:
             "volume": 1.0,
         }
 
-    def get_rates(self, symbol: str, timeframe: str, count: int) -> tuple[dict[str, object], ...]:
+    def get_rates(
+        self,
+        symbol: str,
+        timeframe: str,
+        count: int,
+        cycle_time_utc: datetime | None = None,
+    ) -> tuple[dict[str, object], ...]:
         timeframe_minutes = {"M1": 1, "M5": 5, "M15": 15, "H1": 60}[timeframe.upper()]
         end_time = self.broker_time_value - timedelta(minutes=timeframe_minutes)
         return _build_trend_rates(
@@ -822,7 +828,13 @@ class DeploymentTests(unittest.TestCase):
 
     def test_start_emits_market_data_readiness_on_bridge_rates_failure(self) -> None:
         class FailingRatesBridge(FakeLiveBridge):
-            def get_rates(self, symbol: str, timeframe: str, count: int) -> tuple[dict[str, object], ...]:
+            def get_rates(
+                self,
+                symbol: str,
+                timeframe: str,
+                count: int,
+                cycle_time_utc: datetime | None = None,
+            ) -> tuple[dict[str, object], ...]:
                 if timeframe.upper() == "M1":
                     raise MT5BridgeError(
                         MT5BridgeStatus(
@@ -842,7 +854,7 @@ class DeploymentTests(unittest.TestCase):
                             },
                         )
                     )
-                return super().get_rates(symbol, timeframe, count)
+                return super().get_rates(symbol, timeframe, count, cycle_time_utc=cycle_time_utc)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

@@ -55,8 +55,21 @@ class MT5MarketAdapter:
     def get_latest_tick(self, symbol: str) -> dict[str, Any]:
         return self.bridge.get_latest_tick(symbol)
 
-    def get_rates(self, symbol: str, timeframe: str, count: int) -> list[dict[str, Any]]:
-        return list(self.bridge.get_rates(symbol, timeframe, count))
+    def get_rates(
+        self,
+        symbol: str,
+        timeframe: str,
+        count: int,
+        cycle_time_utc: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        return list(
+            self.bridge.get_rates(
+                symbol,
+                timeframe,
+                count,
+                cycle_time_utc=cycle_time_utc,
+            )
+        )
 
     def get_symbol_contract(self, symbol: str) -> dict[str, Any]:
         return self._normalize_contract(self.bridge.query_symbol_contract(symbol))

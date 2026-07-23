@@ -16,6 +16,7 @@ class FakeBridge:
     heartbeat_status: MT5BridgeStatus
     contract_visible: bool = True
     contract_failure: MT5BridgeError | None = None
+    last_rates_cycle_time_utc: datetime | None = None
 
     def heartbeat(self) -> MT5BridgeStatus:
         return self.heartbeat_status
@@ -28,8 +29,15 @@ class FakeBridge:
             "ask": 2350.2,
         }
 
-    def get_rates(self, symbol: str, timeframe: str, count: int) -> tuple[dict[str, object], ...]:
+    def get_rates(
+        self,
+        symbol: str,
+        timeframe: str,
+        count: int,
+        cycle_time_utc: datetime | None = None,
+    ) -> tuple[dict[str, object], ...]:
         del symbol, timeframe
+        self.last_rates_cycle_time_utc = cycle_time_utc
         bar_time = self.tick_time - timedelta(minutes=count)
         return tuple(
             {
@@ -91,12 +99,35 @@ class MarketAdapterTests(unittest.TestCase):
         self.assertEqual(contract["tick_size"], 0.1)
         self.assertEqual(contract["min_lot"], 0.01)
         self.assertEqual(contract["stop_level_points"], 20)
+        self.assertIsNone(bridge.last_rates_cycle_time_utc)
 
         status = adapter.market_status(now_utc=tick_time + timedelta(seconds=2))
         self.assertTrue(status.ok)
         self.assertEqual(status.health, HealthState.GREEN)
         self.assertEqual(status.response_class, "OK")
         self.assertEqual(status.symbol, "XAUUSD")
+
+    def test_adapter_forwards_cycle_time_to_get_rates(self) -> None:
+        tick_time = datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc)
+        bridge = FakeBridge(
+            tick_time=tick_time,
+            heartbeat_status=MT5BridgeStatus(
+                ok=True,
+                failure_class="",
+                response_class="OK",
+                retryable=False,
+                fatal=False,
+                message="ok",
+                terminal_ready=True,
+                broker_ready=True,
+            ),
+        )
+        adapter = MT5MarketAdapter(bridge=bridge, primary_symbol="XAUUSD")
+
+        rates = adapter.get_rates("xauusd", "M5", 3, cycle_time_utc=tick_time)
+
+        self.assertEqual(len(rates), 3)
+        self.assertEqual(bridge.last_rates_cycle_time_utc, tick_time)
 
     def test_adapter_marks_stale_market_yellow(self) -> None:
         tick_time = datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc)

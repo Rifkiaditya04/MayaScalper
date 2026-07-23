@@ -21,7 +21,13 @@ class MarketDataProvider(Protocol):
     def get_latest_tick(self, symbol: str) -> dict[str, Any]:
         ...
 
-    def get_rates(self, symbol: str, timeframe: str, count: int) -> list[dict[str, Any]]:
+    def get_rates(
+        self,
+        symbol: str,
+        timeframe: str,
+        count: int,
+        cycle_time_utc: datetime | None = None,
+    ) -> list[dict[str, Any]]:
         ...
 
     def get_symbol_contract(self, symbol: str) -> dict[str, Any]:

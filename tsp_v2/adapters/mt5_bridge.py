@@ -775,21 +775,54 @@ class MT5Bridge:
             "normalized_tick": _json_ready(normalized),
         }
 
-    def rates(self, symbol: str, timeframe: str, count: int) -> tuple[dict[str, Any], ...]:
-        return self.get_rates(symbol, timeframe, count)
+    def rates(
+        self,
+        symbol: str,
+        timeframe: str,
+        count: int,
+        cycle_time_utc: datetime | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        return self.get_rates(symbol, timeframe, count, cycle_time_utc=cycle_time_utc)
 
-    def get_rates(self, symbol: str, timeframe: str, count: int) -> tuple[dict[str, Any], ...]:
+    def get_rates(
+        self,
+        symbol: str,
+        timeframe: str,
+        count: int,
+        cycle_time_utc: datetime | None = None,
+    ) -> tuple[dict[str, Any], ...]:
         mt5 = self._require_module()
         symbol_name = _require_symbol(symbol)
         self.query_symbol_contract(symbol_name)
         timeframe_const = _resolve_timeframe(mt5, timeframe)
         captured_at_utc = datetime.now(tz=timezone.utc)
-        records, last_raw = self._fetch_rates_with_retry(
-            mt5,
-            symbol_name,
-            timeframe_const,
-            count,
-        )
+        explicit_cycle_time_utc = _normalize_datetime(cycle_time_utc) if cycle_time_utc is not None else None
+        if explicit_cycle_time_utc is None:
+            records, last_raw = self._fetch_rates_with_retry(
+                mt5,
+                symbol_name,
+                timeframe_const,
+                count,
+            )
+            fetch_metadata = {
+                "fetch_method": "copy_rates_from_pos",
+                "requested_start_utc": None,
+                "requested_end_utc": None,
+                "requested_count": count,
+                "returned_count": len(records),
+                "effective_count": len(records),
+                "fetch_window_minutes": None,
+                "fetch_reference_time_utc": captured_at_utc.isoformat(),
+            }
+        else:
+            records, last_raw, fetch_metadata = self._fetch_rates_range_with_retry(
+                mt5,
+                symbol_name,
+                timeframe,
+                timeframe_const,
+                count,
+                explicit_cycle_time_utc,
+            )
         pre_recovery_last_error = _last_error_payload(mt5)
         ipc_recovery_attempted = False
         ipc_recovery_ok = False
@@ -799,12 +832,32 @@ class MT5Bridge:
             ipc_recovery_ok = self._recover_ipc_connection(mt5, symbol_name)
             if ipc_recovery_ok:
                 post_recovery_last_error = _last_error_payload(mt5)
-                records, last_raw = self._fetch_rates_with_retry(
-                    mt5,
-                    symbol_name,
-                    timeframe_const,
-                    count,
-                )
+                if explicit_cycle_time_utc is None:
+                    records, last_raw = self._fetch_rates_with_retry(
+                        mt5,
+                        symbol_name,
+                        timeframe_const,
+                        count,
+                    )
+                    fetch_metadata = {
+                        "fetch_method": "copy_rates_from_pos",
+                        "requested_start_utc": None,
+                        "requested_end_utc": None,
+                        "requested_count": count,
+                        "returned_count": len(records),
+                        "effective_count": len(records),
+                        "fetch_window_minutes": None,
+                        "fetch_reference_time_utc": captured_at_utc.isoformat(),
+                    }
+                else:
+                    records, last_raw, fetch_metadata = self._fetch_rates_range_with_retry(
+                        mt5,
+                        symbol_name,
+                        timeframe,
+                        timeframe_const,
+                        count,
+                        explicit_cycle_time_utc,
+                    )
                 post_recovery_last_error = _last_error_payload(mt5)
         if not records:
             raise MT5BridgeError(
@@ -818,6 +871,13 @@ class MT5Bridge:
                         "symbol": symbol_name,
                         "timeframe": timeframe,
                         "count": count,
+                        "fetch_method": fetch_metadata["fetch_method"],
+                        "requested_start_utc": fetch_metadata["requested_start_utc"],
+                        "requested_end_utc": fetch_metadata["requested_end_utc"],
+                        "requested_count": fetch_metadata["requested_count"],
+                        "returned_count": fetch_metadata["returned_count"],
+                        "fetch_window_minutes": fetch_metadata["fetch_window_minutes"],
+                        "fetch_reference_time_utc": fetch_metadata["fetch_reference_time_utc"],
                         "raw_type": type(last_raw).__name__ if last_raw is not None else None,
                         "pre_recovery_last_error": pre_recovery_last_error,
                         "ipc_recovery_attempted": ipc_recovery_attempted,
@@ -843,6 +903,7 @@ class MT5Bridge:
                 timeframe=timeframe,
                 broker_offset_hours=broker_offset_hours,
             )
+            | fetch_metadata
             for record in records
         )
 
@@ -864,6 +925,55 @@ class MT5Bridge:
             if attempt < 19:
                 time.sleep(0.5)
         return records, last_raw
+
+    def _fetch_rates_range_with_retry(
+        self,
+        mt5: Any,
+        symbol_name: str,
+        timeframe: str,
+        timeframe_const: Any,
+        count: int,
+        cycle_time_utc: datetime,
+    ) -> tuple[list[dict[str, Any]], Any, dict[str, Any]]:
+        cycle_utc = _normalize_datetime(cycle_time_utc)
+        timeframe_key = timeframe.strip().upper()
+        timeframe_minutes = _timeframe_minutes(timeframe_key)
+        lookback_bars = max(count + 2, 40)
+        window_minutes = timeframe_minutes * lookback_bars
+        requested_end_utc = cycle_utc
+        requested_start_utc = cycle_utc - timedelta(minutes=window_minutes)
+        records: list[dict[str, Any]] = []
+        last_raw: Any = None
+        for attempt in range(20):
+            raw = _safe_call(
+                mt5,
+                "copy_rates_range",
+                symbol_name,
+                timeframe_const,
+                requested_start_utc,
+                requested_end_utc,
+                default=None,
+            )
+            last_raw = raw
+            records = _normalize_records(raw, record_kind="rates", allow_empty=True)
+            if records:
+                break
+            if attempt < 19:
+                time.sleep(0.5)
+        raw_count = len(records)
+        if raw_count > count:
+            records = records[-count:]
+        metadata = {
+            "fetch_method": "copy_rates_range",
+            "requested_start_utc": requested_start_utc.isoformat(),
+            "requested_end_utc": requested_end_utc.isoformat(),
+            "requested_count": count,
+            "returned_count": raw_count,
+            "effective_count": len(records),
+            "fetch_window_minutes": window_minutes,
+            "fetch_reference_time_utc": cycle_utc.isoformat(),
+        }
+        return records, last_raw, metadata
 
     def _probe_market_data_usability(self, symbol: str) -> bool:
         symbol_name = _require_symbol(symbol)
@@ -1648,6 +1758,15 @@ def _resolve_timeframe(mt5: Any, timeframe: str) -> Any:
     if tf.startswith("M") or tf.startswith("H"):
         return tf
     raise ConfigValidationError(f"Unsupported timeframe for MT5 bridge: {timeframe}")
+
+
+def _timeframe_minutes(timeframe: str) -> int:
+    tf = timeframe.strip().upper()
+    if tf.startswith("M") and tf[1:].isdigit():
+        return int(tf[1:])
+    if tf.startswith("H") and tf[1:].isdigit():
+        return int(tf[1:]) * 60
+    raise ConfigValidationError(f"Unsupported timeframe for MT5 rate window: {timeframe}")
 
 
 def _safe_call(mt5: Any, method_name: str, *args: Any, default: Any = None, **kwargs: Any) -> Any:
