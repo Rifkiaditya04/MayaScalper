@@ -499,7 +499,8 @@ class MT5BridgeTests(unittest.TestCase):
         self.assertEqual(fake.last_error(), (0, ""))
 
     def test_get_rates_uses_copy_rates_range_when_cycle_time_is_provided(self) -> None:
-        fake = FakeMT5()
+        cycle_time = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        fake = FakeMT5(tick_time=cycle_time, rates_time=cycle_time)
         bridge = MT5Bridge(
             terminal_path=Path(r"C:\MT5\terminal64.exe"),
             login="123456",
@@ -509,7 +510,6 @@ class MT5BridgeTests(unittest.TestCase):
         )
         bridge.connect()
 
-        cycle_time = datetime(2026, 7, 23, 12, 0, 0, tzinfo=timezone.utc)
         rates = bridge.get_rates("GBPJPY", "M1", 40, cycle_time_utc=cycle_time)
 
         expected_start = cycle_time - timedelta(minutes=42)
@@ -527,6 +527,85 @@ class MT5BridgeTests(unittest.TestCase):
         self.assertEqual(rates[-1]["effective_count"], 40)
         self.assertGreaterEqual(rates[-1]["returned_count"], 40)
         self.assertIsNotNone(rates[-1]["timestamp"].tzinfo)
+
+    def test_get_rates_adaptive_m1_window_expands_until_closed_bars_are_sufficient(self) -> None:
+        cycle_time = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+
+        class SparseAdaptiveFakeMT5(FakeMT5):
+            def copy_rates_range(self, symbol, timeframe, date_from, date_to):
+                self.range_calls.append(
+                    {
+                        "symbol": symbol,
+                        "timeframe": timeframe,
+                        "date_from": date_from,
+                        "date_to": date_to,
+                    }
+                )
+                window_minutes = int((date_to - date_from).total_seconds() // 60)
+                if window_minutes < 90:
+                    current = date_from
+                    records: list[SimpleNamespace] = []
+                    index = 0
+                    while current <= date_to:
+                        records.append(
+                            SimpleNamespace(
+                                time=int(current.timestamp()),
+                                open=100.0 + index,
+                                high=100.5 + index,
+                                low=99.5 + index,
+                                close=100.2 + index,
+                                tick_volume=100 + index,
+                                real_volume=50 + index,
+                            )
+                        )
+                        current += timedelta(minutes=3)
+                        index += 1
+                    return records
+                return super().copy_rates_range(symbol, timeframe, date_from, date_to)
+
+        fake = SparseAdaptiveFakeMT5(tick_time=cycle_time, rates_time=cycle_time)
+        bridge = MT5Bridge(
+            terminal_path=Path(r"C:\MT5\terminal64.exe"),
+            login="123456",
+            password="secret",
+            server="Demo-Server",
+            mt5_module=fake,
+        )
+        bridge.connect()
+
+        rates = bridge.get_rates("GBPJPY", "M1", 40, cycle_time_utc=cycle_time)
+
+        self.assertGreaterEqual(len(fake.range_calls), 3)
+        self.assertEqual(fake.pos_calls, [])
+        self.assertEqual(rates[-1]["fetch_method"], "copy_rates_range")
+        self.assertGreaterEqual(rates[-1]["adaptive_attempts"], 3)
+        self.assertEqual(rates[-1]["adaptive_min_closed_bars"], 34)
+        self.assertGreaterEqual(rates[-1]["adaptive_window_minutes"], 90)
+        self.assertGreaterEqual(rates[-1]["returned_count"], 34)
+        self.assertGreaterEqual(rates[-1]["effective_count"], 34)
+        self.assertEqual(rates[-1]["requested_start_utc"], (cycle_time - timedelta(minutes=90)).isoformat())
+        self.assertEqual(rates[-1]["requested_end_utc"], cycle_time.isoformat())
+        self.assertIsNotNone(rates[-1]["timestamp"].tzinfo)
+
+    def test_get_rates_explicit_range_keeps_m5_single_window(self) -> None:
+        fake = FakeMT5()
+        bridge = MT5Bridge(
+            terminal_path=Path(r"C:\MT5\terminal64.exe"),
+            login="123456",
+            password="secret",
+            server="Demo-Server",
+            mt5_module=fake,
+        )
+        bridge.connect()
+
+        cycle_time = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        rates = bridge.get_rates("GBPJPY", "M5", 71, cycle_time_utc=cycle_time)
+
+        self.assertGreater(len(rates), 0)
+        self.assertEqual(len(fake.range_calls), 1)
+        self.assertEqual(fake.pos_calls, [])
+        self.assertEqual(rates[-1]["fetch_method"], "copy_rates_range")
+        self.assertEqual(rates[-1]["adaptive_attempts"], 1)
 
     def test_get_rates_legacy_path_retains_copy_rates_from_pos_without_cycle_time(self) -> None:
         fake = FakeMT5()
@@ -548,6 +627,60 @@ class MT5BridgeTests(unittest.TestCase):
         self.assertEqual(fake.pos_calls[0]["timeframe"], "M1")
         self.assertEqual(fake.pos_calls[0]["count"], 3)
         self.assertEqual(rates[-1]["fetch_method"], "copy_rates_from_pos")
+
+    def test_get_rates_explicit_range_fails_closed_after_max_window_when_m1_remains_sparse(self) -> None:
+        cycle_time = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+
+        class AlwaysSparseFakeMT5(FakeMT5):
+            def copy_rates_range(self, symbol, timeframe, date_from, date_to):
+                self.range_calls.append(
+                    {
+                        "symbol": symbol,
+                        "timeframe": timeframe,
+                        "date_from": date_from,
+                        "date_to": date_to,
+                    }
+                )
+                current = date_from
+                records: list[SimpleNamespace] = []
+                index = 0
+                while current <= date_to:
+                    records.append(
+                        SimpleNamespace(
+                            time=int(current.timestamp()),
+                            open=100.0 + index,
+                            high=100.5 + index,
+                            low=99.5 + index,
+                            close=100.2 + index,
+                            tick_volume=100 + index,
+                            real_volume=50 + index,
+                        )
+                    )
+                    current += timedelta(minutes=10)
+                    index += 1
+                return records
+
+        fake = AlwaysSparseFakeMT5(tick_time=cycle_time, rates_time=cycle_time)
+        bridge = MT5Bridge(
+            terminal_path=Path(r"C:\MT5\terminal64.exe"),
+            login="123456",
+            password="secret",
+            server="Demo-Server",
+            mt5_module=fake,
+        )
+        bridge.connect()
+
+        with self.assertRaises(Exception) as ctx:
+            bridge.get_rates("GBPJPY", "M1", 40, cycle_time_utc=cycle_time)
+
+        status = getattr(ctx.exception, "status", None)
+        self.assertIsNotNone(status)
+        diagnostics = status.diagnostics
+        self.assertEqual(diagnostics["fetch_method"], "copy_rates_range")
+        self.assertEqual(diagnostics["adaptive_min_closed_bars"], 34)
+        self.assertGreaterEqual(diagnostics["adaptive_attempts"], 4)
+        self.assertEqual(diagnostics["requested_start_utc"], (cycle_time - timedelta(minutes=120)).isoformat())
+        self.assertEqual(fake.pos_calls, [])
 
     def test_get_rates_fails_recovery_when_probe_fails_after_connect(self) -> None:
         fake = FakeMT5(
@@ -601,7 +734,7 @@ class MT5BridgeTests(unittest.TestCase):
         self.assertIsNotNone(status)
         diagnostics = status.diagnostics
         self.assertEqual(diagnostics["fetch_method"], "copy_rates_range")
-        self.assertEqual(diagnostics["requested_start_utc"], (cycle_time - timedelta(minutes=42)).isoformat())
+        self.assertEqual(diagnostics["requested_start_utc"], (cycle_time - timedelta(minutes=120)).isoformat())
         self.assertEqual(diagnostics["requested_end_utc"], cycle_time.isoformat())
         self.assertGreater(len(fake.range_calls), 0)
         self.assertEqual(fake.pos_calls, [])

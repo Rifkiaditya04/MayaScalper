@@ -18,6 +18,10 @@ RESPONSE_DEGRADE_SYMBOL = "DEGRADE_SYMBOL"
 RESPONSE_BLOCK_EXECUTION = "BLOCK_EXECUTION"
 RESPONSE_TRIGGER_RECONCILIATION = "TRIGGER_RECONCILIATION"
 RESPONSE_ESCALATE_KILL_REVIEW = "ESCALATE_KILL_REVIEW"
+M1_HISTORY_LOOKBACK_MINUTES_INITIAL = 42
+M1_HISTORY_LOOKBACK_MINUTES_STEP = 24
+M1_HISTORY_LOOKBACK_MINUTES_MAX = 120
+M1_HISTORY_MIN_CLOSED_BARS = 34
 
 SUCCESS_RET_CODES = {
     "DONE",
@@ -878,6 +882,10 @@ class MT5Bridge:
                         "returned_count": fetch_metadata["returned_count"],
                         "fetch_window_minutes": fetch_metadata["fetch_window_minutes"],
                         "fetch_reference_time_utc": fetch_metadata["fetch_reference_time_utc"],
+                        "adaptive_attempts": fetch_metadata.get("adaptive_attempts"),
+                        "adaptive_window_minutes": fetch_metadata.get("adaptive_window_minutes"),
+                        "adaptive_min_closed_bars": fetch_metadata.get("adaptive_min_closed_bars"),
+                        "adaptive_closed_count": fetch_metadata.get("adaptive_closed_count"),
                         "raw_type": type(last_raw).__name__ if last_raw is not None else None,
                         "pre_recovery_last_error": pre_recovery_last_error,
                         "ipc_recovery_attempted": ipc_recovery_attempted,
@@ -938,42 +946,138 @@ class MT5Bridge:
         cycle_utc = _normalize_datetime(cycle_time_utc)
         timeframe_key = timeframe.strip().upper()
         timeframe_minutes = _timeframe_minutes(timeframe_key)
-        lookback_bars = max(count + 2, 40)
-        window_minutes = timeframe_minutes * lookback_bars
-        requested_end_utc = cycle_utc
-        requested_start_utc = cycle_utc - timedelta(minutes=window_minutes)
-        records: list[dict[str, Any]] = []
-        last_raw: Any = None
-        for attempt in range(20):
-            raw = _safe_call(
-                mt5,
-                "copy_rates_range",
-                symbol_name,
-                timeframe_const,
-                requested_start_utc,
-                requested_end_utc,
-                default=None,
+        captured_at_utc = datetime.now(tz=timezone.utc)
+
+        def fetch_window(*, requested_start_utc: datetime, requested_end_utc: datetime) -> tuple[list[dict[str, Any]], Any]:
+            records: list[dict[str, Any]] = []
+            last_raw: Any = None
+            for attempt in range(20):
+                raw = _safe_call(
+                    mt5,
+                    "copy_rates_range",
+                    symbol_name,
+                    timeframe_const,
+                    requested_start_utc,
+                    requested_end_utc,
+                    default=None,
+                )
+                last_raw = raw
+                records = _normalize_records(raw, record_kind="rates", allow_empty=True)
+                if records:
+                    break
+                if attempt < 19:
+                    time.sleep(0.5)
+            return records, last_raw
+
+        def window_metadata(
+            *,
+            requested_start_utc: datetime,
+            requested_end_utc: datetime,
+            returned_count: int,
+            effective_count: int,
+            fetch_window_minutes: int,
+            adaptive_attempts: int,
+            adaptive_closed_count: int,
+        ) -> dict[str, Any]:
+            return {
+                "fetch_method": "copy_rates_range",
+                "requested_start_utc": requested_start_utc.isoformat(),
+                "requested_end_utc": requested_end_utc.isoformat(),
+                "requested_count": count,
+                "returned_count": returned_count,
+                "effective_count": effective_count,
+                "fetch_window_minutes": fetch_window_minutes,
+                "fetch_reference_time_utc": cycle_utc.isoformat(),
+                "adaptive_attempts": adaptive_attempts,
+                "adaptive_window_minutes": fetch_window_minutes,
+                "adaptive_min_closed_bars": M1_HISTORY_MIN_CLOSED_BARS,
+                "adaptive_closed_count": adaptive_closed_count,
+            }
+
+        if timeframe_key != "M1":
+            lookback_bars = max(count + 2, 40)
+            window_minutes = timeframe_minutes * lookback_bars
+            requested_end_utc = cycle_utc
+            requested_start_utc = cycle_utc - timedelta(minutes=window_minutes)
+            records, last_raw = fetch_window(
+                requested_start_utc=requested_start_utc,
+                requested_end_utc=requested_end_utc,
             )
-            last_raw = raw
-            records = _normalize_records(raw, record_kind="rates", allow_empty=True)
-            if records:
+            raw_count = len(records)
+            if raw_count > count:
+                records = records[-count:]
+            metadata = window_metadata(
+                requested_start_utc=requested_start_utc,
+                requested_end_utc=requested_end_utc,
+                returned_count=raw_count,
+                effective_count=len(records),
+                fetch_window_minutes=window_minutes,
+                adaptive_attempts=1,
+                adaptive_closed_count=raw_count,
+            )
+            return records, last_raw, metadata
+
+        lookback_minutes = M1_HISTORY_LOOKBACK_MINUTES_INITIAL
+        attempts = 0
+        last_raw: Any = None
+        last_records: list[dict[str, Any]] = []
+        last_raw_count = 0
+        last_closed_count = 0
+        requested_start_utc = cycle_utc - timedelta(minutes=lookback_minutes)
+        requested_end_utc = cycle_utc
+        while True:
+            attempts += 1
+            requested_start_utc = cycle_utc - timedelta(minutes=lookback_minutes)
+            last_records, last_raw = fetch_window(
+                requested_start_utc=requested_start_utc,
+                requested_end_utc=requested_end_utc,
+            )
+            last_raw_count = len(last_records)
+            if last_records:
+                reference_record = max(last_records, key=_record_timestamp_for_normalization)
+                reference_timestamp = _record_timestamp_for_normalization(reference_record)
+                broker_offset_hours = _infer_broker_offset_hours(
+                    source_timestamp=reference_timestamp,
+                    captured_at_utc=captured_at_utc,
+                )
+                last_closed_count = _count_closed_rate_records(
+                    last_records,
+                    timeframe=timeframe_key,
+                    broker_offset_hours=broker_offset_hours,
+                    cycle_time_utc=cycle_utc,
+                )
+                if last_closed_count >= M1_HISTORY_MIN_CLOSED_BARS:
+                    if len(last_records) > count:
+                        last_records = last_records[-count:]
+                    metadata = window_metadata(
+                        requested_start_utc=requested_start_utc,
+                        requested_end_utc=requested_end_utc,
+                        returned_count=last_raw_count,
+                        effective_count=len(last_records),
+                        fetch_window_minutes=lookback_minutes,
+                        adaptive_attempts=attempts,
+                        adaptive_closed_count=last_closed_count,
+                    )
+                    return last_records, last_raw, metadata
+            if lookback_minutes >= M1_HISTORY_LOOKBACK_MINUTES_MAX:
                 break
-            if attempt < 19:
-                time.sleep(0.5)
-        raw_count = len(records)
-        if raw_count > count:
-            records = records[-count:]
-        metadata = {
-            "fetch_method": "copy_rates_range",
-            "requested_start_utc": requested_start_utc.isoformat(),
-            "requested_end_utc": requested_end_utc.isoformat(),
-            "requested_count": count,
-            "returned_count": raw_count,
-            "effective_count": len(records),
-            "fetch_window_minutes": window_minutes,
-            "fetch_reference_time_utc": cycle_utc.isoformat(),
-        }
-        return records, last_raw, metadata
+            next_lookback_minutes = min(
+                M1_HISTORY_LOOKBACK_MINUTES_MAX,
+                lookback_minutes + M1_HISTORY_LOOKBACK_MINUTES_STEP,
+            )
+            if next_lookback_minutes == lookback_minutes:
+                break
+            lookback_minutes = next_lookback_minutes
+        metadata = window_metadata(
+            requested_start_utc=requested_start_utc,
+            requested_end_utc=requested_end_utc,
+            returned_count=last_raw_count,
+            effective_count=len(last_records),
+            fetch_window_minutes=lookback_minutes,
+            adaptive_attempts=attempts,
+            adaptive_closed_count=last_closed_count,
+        )
+        return [], last_raw, metadata
 
     def _probe_market_data_usability(self, symbol: str) -> bool:
         symbol_name = _require_symbol(symbol)
@@ -1767,6 +1871,22 @@ def _timeframe_minutes(timeframe: str) -> int:
     if tf.startswith("H") and tf[1:].isdigit():
         return int(tf[1:]) * 60
     raise ConfigValidationError(f"Unsupported timeframe for MT5 rate window: {timeframe}")
+
+
+def _count_closed_rate_records(
+    records: Sequence[dict[str, Any]],
+    *,
+    timeframe: str,
+    broker_offset_hours: int,
+    cycle_time_utc: datetime,
+) -> int:
+    timeframe_minutes = _timeframe_minutes(timeframe)
+    return sum(
+        1
+        for record in records
+        if _record_timestamp_for_normalization(record) - timedelta(hours=broker_offset_hours) + timedelta(minutes=timeframe_minutes)
+        <= cycle_time_utc
+    )
 
 
 def _safe_call(mt5: Any, method_name: str, *args: Any, default: Any = None, **kwargs: Any) -> Any:
