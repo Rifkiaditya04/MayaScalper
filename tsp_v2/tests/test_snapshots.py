@@ -253,6 +253,8 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(diagnostics[-1]["symbol"], "XAUUSD")
         self.assertEqual(provider.last_cycle_time_utc, cycle_time)
         self.assertEqual(diagnostics[-1]["returned_bars"]["M1"], 40)
+        self.assertEqual(diagnostics[-1]["requested_bars"]["M5"], 90)
+        self.assertEqual(diagnostics[-1]["returned_bars"]["M5"], 90)
         self.assertEqual(diagnostics[-1]["closed_bar_count"]["M1"], 40)
 
     def test_snapshot_emits_closed_bar_diagnostics_before_rejecting(self) -> None:
@@ -329,7 +331,7 @@ class SnapshotTests(unittest.TestCase):
                 config=config,
                 symbol="XAUUSD",
                 cycle_time_utc=cycle_time,
-                build_config=SnapshotBuildConfig(m5_bars=71),
+                build_config=SnapshotBuildConfig(m5_bars=90),
             )
         self.assertEqual(snapshot.payload_health, HealthState.YELLOW)
         self.assertEqual(snapshot.payload_diagnostics["status"], "YELLOW")
@@ -340,7 +342,7 @@ class SnapshotTests(unittest.TestCase):
         provider = ThinMarketProvider(
             tick_time=cycle_time,
             m1_last_time=cycle_time - timedelta(minutes=1),
-            m5_shortfall=2,
+            m5_shortfall=21,
         )
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = self._load_config(Path(tmp_dir))
@@ -350,7 +352,7 @@ class SnapshotTests(unittest.TestCase):
                     config=config,
                     symbol="XAUUSD",
                     cycle_time_utc=cycle_time,
-                    build_config=SnapshotBuildConfig(m5_bars=71),
+                    build_config=SnapshotBuildConfig(m5_bars=90),
                 )
 
     def test_snapshot_emits_m5_raw_bar_dump_when_m5_closed_bars_are_insufficient(self) -> None:
@@ -476,7 +478,7 @@ class SnapshotTests(unittest.TestCase):
                     config=config,
                     symbol="XAUUSD",
                     cycle_time_utc=cycle_time,
-                    build_config=SnapshotBuildConfig(m1_bars=34, m5_bars=71),
+                    build_config=SnapshotBuildConfig(m1_bars=34, m5_bars=90),
                     diagnostics_hook=diagnostics.append,
                 )
         self.assertTrue(diagnostics)

@@ -33,9 +33,9 @@ PAYLOAD_YELLOW_TOLERANCE = 0
 @dataclass(frozen=True, slots=True)
 class SnapshotBuildConfig:
     m1_bars: int = MIN_BARS_PER_TIMEFRAME
-    # Request one extra raw M5 bar so the closed-bar filter still has 70 closed bars
-    # even when the most recent raw bar is still forming.
-    m5_bars: int = MIN_BARS_BREAKOUT_M5 + 1
+    # Request a fixed larger M5 window so the closed-bar filter still has room to
+    # yield 70 closed bars even when the most recent raw bar is still forming.
+    m5_bars: int = 90
     m15_bars: int = MIN_BARS_PER_TIMEFRAME
     h1_bars: int = MIN_BARS_PER_TIMEFRAME
 

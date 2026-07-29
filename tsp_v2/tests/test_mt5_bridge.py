@@ -599,13 +599,15 @@ class MT5BridgeTests(unittest.TestCase):
         bridge.connect()
 
         cycle_time = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-        rates = bridge.get_rates("GBPJPY", "M5", 71, cycle_time_utc=cycle_time)
+        rates = bridge.get_rates("GBPJPY", "M5", 90, cycle_time_utc=cycle_time)
 
         self.assertGreater(len(rates), 0)
         self.assertEqual(len(fake.range_calls), 1)
         self.assertEqual(fake.pos_calls, [])
         self.assertEqual(rates[-1]["fetch_method"], "copy_rates_range")
         self.assertEqual(rates[-1]["adaptive_attempts"], 1)
+        self.assertEqual(rates[-1]["requested_count"], 90)
+        self.assertEqual(rates[-1]["fetch_window_minutes"], 460)
 
     def test_get_rates_legacy_path_retains_copy_rates_from_pos_without_cycle_time(self) -> None:
         fake = FakeMT5()
