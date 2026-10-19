@@ -16,10 +16,10 @@ from tsp_v2.config import load_config
 from tsp_v2.config_schema import ConfigValidationError
 import tsp_v2.deployment as deployment_module
 from tsp_v2.deployment import DeploymentRuntime, SingleInstanceLock
-from tsp_v2.enums import ClockHealth, Direction, GovernorState, HealthState, PaceClassification
+from tsp_v2.enums import ClockHealth, Direction, GovernorState, HealthState, PaceClassification, RiskAction, SignalFamily
 from tsp_v2.live_runtime import LiveCycleReport, LiveRuntimeRunner
 from tsp_v2.persistence import SQLiteRuntimeStore
-from tsp_v2.models import ExecutionResult
+from tsp_v2.models import ExecutionResult, GovernorDecision, RiskDecision, SignalDecision, SignalEvaluation
 
 
 BASE_TEMPLATE = """
@@ -30,7 +30,7 @@ bot:
   poll_interval_seconds: 5
 symbols:
   allowlist:
-    - XAUUSD
+{allowlist}
 alpha:
   setup_cooldown_bars: 1
 regime:
@@ -826,6 +826,147 @@ class DeploymentTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_run_cycle_emits_portfolio_selection_telemetry_for_each_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = _load_config(root, allow_live_execution=True, allowlist=("XAUUSD", "GBPUSD"))
+            fake_bridge = FakeLiveBridge(
+                broker_time_value=datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc),
+                positions_payload=[
+                    {
+                        "symbol": "GBPUSD",
+                        "direction": "LONG",
+                        "setup_id": "seed-gbpusd",
+                        "submission_uuid": "seed-submission",
+                        "position_ticket": 1,
+                        "ticket": 1,
+                        "risk_pct": 2.25,
+                        "signal_score": 0.75,
+                    }
+                ],
+            )
+            store = SQLiteRuntimeStore(config.persistence.sqlite_path)
+            store.initialize()
+            store.set_config_fingerprint(config.fingerprint)
+            try:
+                runner = LiveRuntimeRunner(
+                    config=config,
+                    store=store,
+                    bridge=fake_bridge,
+                    market_adapter=SimpleNamespace(
+                        get_broker_time=lambda: datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc),
+                        market_status=lambda now_utc: SimpleNamespace(ok=True, health=HealthState.GREEN, message="ok"),
+                    ),
+                    execution_adapter=SimpleNamespace(
+                        registry=SimpleNamespace(entries_by_setup_id={}, entries_by_submission_uuid={}),
+                        execute=unittest.mock.Mock(side_effect=AssertionError("execute should not be called")),
+                    ),
+                    bootstrap_report=SimpleNamespace(ready_to_resume=True),
+                )
+                broker_time = datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc)
+                def build_snapshot(symbol: str) -> SimpleNamespace:
+                    return SimpleNamespace(
+                        symbol=symbol,
+                        cycle_time_utc=broker_time,
+                        tick_bid=100.0,
+                        tick_ask=100.1,
+                        feed_health=HealthState.GREEN,
+                        spread_health=HealthState.GREEN,
+                        latency_health=HealthState.GREEN,
+                        bars_m5=({"close_time_utc": broker_time - timedelta(minutes=5)},),
+                        news=SimpleNamespace(lockout_active=False),
+                    )
+
+                def fake_evaluate_signals(snapshot, regime, governor_state, active_signal_keys):
+                    del regime, governor_state, active_signal_keys
+                    score = 0.95 if snapshot.symbol == "XAUUSD" else 0.90
+                    decision = SignalDecision(
+                        setup_id=f"{snapshot.symbol.lower()}-{score:.2f}",
+                        signal_family=SignalFamily.TREND_CONTINUATION,
+                        symbol=snapshot.symbol,
+                        direction=Direction.LONG,
+                        score=score,
+                        threshold=0.70,
+                        expires_at_utc=broker_time + timedelta(minutes=10),
+                        rationale="test",
+                        lineage=("REGIME:TREND",),
+                    )
+                    return SignalEvaluation(True, decision, "", f"key-{snapshot.symbol.lower()}", {})
+
+                with (
+                    patch("tsp_v2.live_runtime.BrokerReconciliationRuntime.reconcile", return_value=SimpleNamespace(ready_to_resume=True)),
+                    patch("tsp_v2.live_runtime.build_market_snapshot", side_effect=lambda provider, **kwargs: build_snapshot(kwargs["symbol"])),
+                    patch("tsp_v2.live_runtime.classify_regime", return_value=SimpleNamespace(regime="TREND")),
+                    patch("tsp_v2.live_runtime.evaluate_signals", side_effect=fake_evaluate_signals),
+                    patch(
+                        "tsp_v2.live_runtime.evaluate_risk",
+                        return_value=RiskDecision(
+                            action=RiskAction.BLOCK,
+                            risk_multiplier=0.0,
+                            sized_volume=0.0,
+                            invalidation_price=0.0,
+                            hard_block_reason="test",
+                            governor_adjusted_state=GovernorState.NORMAL,
+                            diagnostics={},
+                        ),
+                    ),
+                    patch(
+                        "tsp_v2.live_runtime.evaluate_governor",
+                        return_value=GovernorDecision(
+                            state=GovernorState.NORMAL,
+                            state_reason="normal",
+                            pace_classification=PaceClassification.ON_TRACK,
+                            aggression_multiplier=1.0,
+                            profile_constraints={},
+                            escalation_flags=(),
+                        ),
+                    ),
+                ):
+                    cycle_report = runner._run_cycle()
+
+                self.assertIsNotNone(cycle_report)
+                assert cycle_report is not None
+                self.assertEqual(cycle_report.signal_count, 2)
+                self.assertEqual(cycle_report.selected_symbols, ("XAUUSD",))
+                telemetry_db = sqlite3.connect(config.persistence.sqlite_path)
+                telemetry_db.row_factory = sqlite3.Row
+                rows = telemetry_db.execute(
+                    """
+                    SELECT topic, payload_json
+                    FROM telemetry_index
+                    WHERE topic = 'runtime.portfolio_selection'
+                    ORDER BY rowid ASC
+                    """
+                ).fetchall()
+                runtime_rows = telemetry_db.execute(
+                    """
+                    SELECT payload_json
+                    FROM telemetry_index
+                    WHERE topic = 'runtime_cycle'
+                    ORDER BY rowid DESC
+                    LIMIT 1
+                    """
+                ).fetchall()
+                telemetry_db.close()
+                self.assertEqual(len(rows), 2)
+                first_payload = json.loads(rows[0]["payload_json"])
+                second_payload = json.loads(rows[1]["payload_json"])
+                self.assertEqual(first_payload["cycle_time_utc"], broker_time.isoformat())
+                self.assertEqual(first_payload["symbol"], "XAUUSD")
+                self.assertEqual(first_payload["setup_id"], "xauusd-0.95")
+                self.assertTrue(first_payload["selected"])
+                self.assertIsNone(first_payload["first_rejection_reason"])
+                self.assertEqual(second_payload["setup_id"], "gbpusd-0.90")
+                self.assertFalse(second_payload["selected"])
+                self.assertEqual(second_payload["first_rejection_reason"], "CORRELATION_BUDGET")
+                self.assertEqual(second_payload["candidate_rank"], 2)
+                self.assertTrue(runtime_rows)
+                runtime_payload = json.loads(runtime_rows[0]["payload_json"])
+                self.assertEqual(runtime_payload["selected_signal_count"], 1)
+                self.assertEqual(runtime_payload["execution_count"], 0)
+            finally:
+                store.close()
+
     def test_start_emits_market_data_readiness_on_bridge_rates_failure(self) -> None:
         class FailingRatesBridge(FakeLiveBridge):
             def get_rates(
@@ -1004,7 +1145,7 @@ class DeploymentTests(unittest.TestCase):
             self.assertFalse(runtime.lock.is_owned())
 
 
-def _load_config(root: Path, *, allow_live_execution: bool = False):
+def _load_config(root: Path, *, allow_live_execution: bool = False, allowlist: tuple[str, ...] = ("XAUUSD",)):
     news_path = root / "news.json"
     news_path.write_text(
         "{\"generated_at_utc\":\"2026-05-29T09:00:00+00:00\",\"events\":[]}",
@@ -1017,6 +1158,7 @@ def _load_config(root: Path, *, allow_live_execution: bool = False):
         lock_path=str(lock_path).replace("\\", "/"),
         news_path=str(news_path).replace("\\", "/"),
         allow_live_execution="true" if allow_live_execution else "false",
+        allowlist="".join(f"    - {symbol}\n" for symbol in allowlist),
     )
     (root / "base.yaml").write_text(base_text, encoding="utf-8")
     (root / "profile.yaml").write_text(

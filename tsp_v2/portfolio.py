@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from .enums import HealthState, SignalFamily
@@ -19,11 +20,30 @@ CORRELATION_GROUP_CAPS: dict[str, float] = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class PortfolioSelectionTrace:
+    setup_id: str
+    symbol: str
+    score: float
+    threshold: float
+    selected: bool
+    first_rejection_reason: str | None = None
+
+
 def rank_opportunities(
     signals: list[SignalDecision],
     *,
     context: PortfolioContext | None = None,
 ) -> list[SignalDecision]:
+    selected, _ = trace_rank_opportunities(signals, context=context)
+    return selected
+
+
+def trace_rank_opportunities(
+    signals: list[SignalDecision],
+    *,
+    context: PortfolioContext | None = None,
+) -> tuple[list[SignalDecision], tuple[PortfolioSelectionTrace, ...]]:
     ctx = context or PortfolioContext()
     active_positions = tuple(ctx.active_positions)
     current_time = ctx.current_time_utc
@@ -38,32 +58,68 @@ def rank_opportunities(
     )
     selected: list[SignalDecision] = []
     selected_symbols: set[str] = set()
+    traces: list[PortfolioSelectionTrace] = []
     active_group_risk = _active_group_risk(active_positions)
     weakest_active = _weakest_active_position(active_positions)
 
-    for signal in ranked:
+    for index, signal in enumerate(ranked):
         if len(selected) >= MAX_CONCURRENT_POSITIONS:
+            for remaining in ranked[index:]:
+                traces.append(
+                    PortfolioSelectionTrace(
+                        setup_id=remaining.setup_id,
+                        symbol=remaining.symbol,
+                        score=remaining.score,
+                        threshold=remaining.threshold,
+                        selected=False,
+                        first_rejection_reason="CAPACITY_LIMIT_REACHED",
+                    )
+                )
             break
+        rejection_reason: str | None = None
         if _is_expired(signal, current_time):
-            continue
-        if _is_on_cooldown(signal.symbol, current_time, ctx.symbol_cooldown_until_utc):
-            continue
-        if signal.symbol in selected_symbols:
-            continue
-        if ctx.execution_health is not HealthState.GREEN:
-            continue
-        if ctx.spread_health is not HealthState.GREEN:
-            continue
-        if ctx.latency_health is not HealthState.GREEN:
-            continue
-        if not _correlation_budget_allows(signal, active_group_risk):
-            continue
-        if len(active_positions) >= MAX_CONCURRENT_POSITIONS and not _replacement_allowed(signal, weakest_active, ctx):
+            rejection_reason = "EXPIRED"
+        elif _is_on_cooldown(signal.symbol, current_time, ctx.symbol_cooldown_until_utc):
+            rejection_reason = "SYMBOL_COOLDOWN"
+        elif signal.symbol in selected_symbols:
+            rejection_reason = "DUPLICATE_SYMBOL"
+        elif ctx.execution_health is not HealthState.GREEN:
+            rejection_reason = "EXECUTION_HEALTH"
+        elif ctx.spread_health is not HealthState.GREEN:
+            rejection_reason = "SPREAD_HEALTH"
+        elif ctx.latency_health is not HealthState.GREEN:
+            rejection_reason = "LATENCY_HEALTH"
+        elif not _correlation_budget_allows(signal, active_group_risk):
+            rejection_reason = "CORRELATION_BUDGET"
+        elif len(active_positions) >= MAX_CONCURRENT_POSITIONS and not _replacement_allowed(signal, weakest_active, ctx):
+            rejection_reason = "REPLACEMENT_NOT_ALLOWED"
+
+        if rejection_reason is not None:
+            traces.append(
+                PortfolioSelectionTrace(
+                    setup_id=signal.setup_id,
+                    symbol=signal.symbol,
+                    score=signal.score,
+                    threshold=signal.threshold,
+                    selected=False,
+                    first_rejection_reason=rejection_reason,
+                )
+            )
             continue
         selected.append(signal)
         selected_symbols.add(signal.symbol)
+        traces.append(
+            PortfolioSelectionTrace(
+                setup_id=signal.setup_id,
+                symbol=signal.symbol,
+                score=signal.score,
+                threshold=signal.threshold,
+                selected=True,
+                first_rejection_reason=None,
+            )
+        )
 
-    return selected
+    return selected, tuple(traces)
 
 
 def _replacement_allowed(

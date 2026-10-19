@@ -5,7 +5,7 @@ import unittest
 
 from tsp_v2.enums import Direction, HealthState, NewsProviderMode, NewsProviderState, SessionName, SignalFamily
 from tsp_v2.models import ContractSnapshot, MarketSnapshot, NewsSnapshot, PortfolioContext, PositionSnapshot, SignalDecision
-from tsp_v2.portfolio import rank_opportunities
+from tsp_v2.portfolio import rank_opportunities, trace_rank_opportunities
 
 
 class PortfolioTests(unittest.TestCase):
@@ -55,19 +55,128 @@ class PortfolioTests(unittest.TestCase):
         )
         self.assertEqual(ranked, [])
 
+    def test_trace_rank_opportunities_reports_first_rejection_reason_per_candidate(self) -> None:
+        current_time = datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc)
+        cases = [
+            (
+                "expired",
+                [_signal("XAUUSD", 0.91, current_time=current_time - timedelta(minutes=12))],
+                _context(current_time_utc=current_time),
+                [],
+                ["EXPIRED"],
+            ),
+            (
+                "cooldown",
+                [_signal("XAUUSD", 0.91, current_time=current_time)],
+                _context(
+                    current_time_utc=current_time,
+                    symbol_cooldown_until_utc={"XAUUSD": current_time + timedelta(minutes=4)},
+                ),
+                [],
+                ["SYMBOL_COOLDOWN"],
+            ),
+            (
+                "duplicate",
+                [_signal("XAUUSD", 0.95), _signal("XAUUSD", 0.90)],
+                _context(),
+                ["XAUUSD"],
+                [None, "DUPLICATE_SYMBOL"],
+            ),
+            (
+                "execution_health",
+                [_signal("XAUUSD", 0.91)],
+                _context(execution_health=HealthState.YELLOW),
+                [],
+                ["EXECUTION_HEALTH"],
+            ),
+            (
+                "spread_health",
+                [_signal("XAUUSD", 0.91)],
+                _context(spread_health=HealthState.RED),
+                [],
+                ["SPREAD_HEALTH"],
+            ),
+            (
+                "latency_health",
+                [_signal("XAUUSD", 0.91)],
+                _context(latency_health=HealthState.RED),
+                [],
+                ["LATENCY_HEALTH"],
+            ),
+            (
+                "correlation_budget",
+                [_signal("GBPUSD", 0.91)],
+                _context(
+                    active_positions=(
+                        PositionSnapshot("GBPUSD", Direction.LONG, "seed-1", "GBPUSD_EURUSD", 2.25, signal_score=0.75),
+                    )
+                ),
+                [],
+                ["CORRELATION_BUDGET"],
+            ),
+            (
+                "replacement_not_allowed",
+                [_signal("GBPUSD", 0.91)],
+                _context(
+                    active_positions=(
+                        PositionSnapshot("XAUUSD", Direction.LONG, "seed-1", "XAUUSD", 0.40, signal_score=0.90),
+                        PositionSnapshot("GBPUSD", Direction.LONG, "seed-2", "GBPUSD_EURUSD", 0.50, signal_score=0.88),
+                    ),
+                ),
+                [],
+                ["REPLACEMENT_NOT_ALLOWED"],
+            ),
+            (
+                "capacity_limit_reached",
+                [_signal("XAUUSD", 0.95), _signal("GBPUSD", 0.90), _signal("EURUSD", 0.85)],
+                _context(),
+                ["XAUUSD", "GBPUSD"],
+                [None, None, "CAPACITY_LIMIT_REACHED"],
+            ),
+            (
+                "selected",
+                [_signal("XAUUSD", 0.95)],
+                _context(),
+                ["XAUUSD"],
+                [None],
+            ),
+        ]
+
+        for label, signals, context, expected_selected_symbols, expected_reasons in cases:
+            with self.subTest(label=label):
+                selected, traces = trace_rank_opportunities(signals, context=context)
+                self.assertEqual([item.symbol for item in selected], expected_selected_symbols)
+                self.assertEqual(
+                    [item.symbol for item in rank_opportunities(signals, context=context)],
+                    expected_selected_symbols,
+                )
+                self.assertEqual(len(traces), len(signals))
+                self.assertEqual([trace.selected for trace in traces], [reason is None for reason in expected_reasons])
+                self.assertEqual([trace.first_rejection_reason for trace in traces], expected_reasons)
+                for trace in traces:
+                    self.assertEqual(trace.score, next(signal.score for signal in signals if signal.setup_id == trace.setup_id))
+                    self.assertEqual(trace.threshold, next(signal.threshold for signal in signals if signal.setup_id == trace.setup_id))
+
 
 def _context(
     *,
     active_positions: tuple[PositionSnapshot, ...] = (),
     current_time_utc: datetime | None = None,
     symbol_cooldown_until_utc: dict[str, datetime] | None = None,
+    execution_health: HealthState = HealthState.GREEN,
+    spread_health: HealthState = HealthState.GREEN,
+    latency_health: HealthState = HealthState.GREEN,
+    replacement_superiority: float = 0.12,
+    max_positions: int = 2,
 ) -> PortfolioContext:
     return PortfolioContext(
         active_positions=active_positions,
         current_time_utc=current_time_utc,
-        execution_health=HealthState.GREEN,
-        spread_health=HealthState.GREEN,
-        latency_health=HealthState.GREEN,
+        execution_health=execution_health,
+        spread_health=spread_health,
+        latency_health=latency_health,
+        replacement_superiority=replacement_superiority,
+        max_positions=max_positions,
         symbol_cooldown_until_utc=symbol_cooldown_until_utc or {},
     )
 

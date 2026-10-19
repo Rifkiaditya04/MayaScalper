@@ -27,7 +27,7 @@ from .models import (
     SignalDecision,
 )
 from .persistence import RecoveryEventRecord, SQLiteRuntimeStore
-from .portfolio import rank_opportunities
+from .portfolio import PortfolioSelectionTrace, trace_rank_opportunities
 from .recovery import BrokerReconciliationReport, BrokerReconciliationRuntime
 from .regime import classify_regime
 from .risk import evaluate_risk
@@ -306,7 +306,7 @@ class LiveRuntimeRunner:
 
         accepted_signals = [evaluation.decision for evaluation in signal_evaluations if evaluation.accepted and evaluation.decision is not None]
         signal_decisions = tuple(accepted_signals)
-        selected_signals = rank_opportunities(
+        selected_signals, selection_traces = trace_rank_opportunities(
             list(signal_decisions),
             context=PortfolioContext(
                 active_positions=self._broker_positions_as_snapshots(broker_positions),
@@ -316,6 +316,10 @@ class LiveRuntimeRunner:
                 latency_health=_aggregate_health(snapshot.latency_health for snapshot in snapshots.values()),
                 symbol_cooldown_until_utc={},
             ),
+        )
+        self._emit_portfolio_selection_telemetry(
+            cycle_time_utc=broker_time,
+            selection_traces=selection_traces,
         )
 
         governor_context = self._governor_context(
@@ -490,6 +494,27 @@ class LiveRuntimeRunner:
                 "broker_balance": float(broker_account.get("balance", broker_account.get("equity", 0.0))),
             },
         )
+
+    def _emit_portfolio_selection_telemetry(
+        self,
+        *,
+        cycle_time_utc: datetime,
+        selection_traces: tuple[PortfolioSelectionTrace, ...],
+    ) -> None:
+        if not self.config.telemetry.emit_candidate_diagnostics:
+            return
+        for candidate_rank, trace in enumerate(selection_traces, start=1):
+            payload: dict[str, Any] = {
+                "cycle_time_utc": cycle_time_utc.isoformat(),
+                "candidate_rank": candidate_rank,
+                "symbol": trace.symbol,
+                "setup_id": trace.setup_id,
+                "score": trace.score,
+                "threshold": trace.threshold,
+                "selected": trace.selected,
+                "first_rejection_reason": trace.first_rejection_reason,
+            }
+            self._emit_telemetry("runtime.portfolio_selection", payload)
 
     def _emit_recovered(self, when: datetime, *, bootstrap_ready: bool) -> None:
         self._emit_telemetry(
