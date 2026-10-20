@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import time
 from typing import Any, Mapping
 
@@ -16,9 +16,11 @@ from .execution import ExecutionRegistryBook, validate_execution_intent
 from .governor import evaluate_governor
 from .models import (
     ExecutionResult,
+    ExecutionIntent,
     GovernorContext,
     GovernorDecision,
     MarketSnapshot,
+    LifecycleState,
     PortfolioContext,
     PositionSnapshot,
     RiskContext,
@@ -27,6 +29,7 @@ from .models import (
     SignalDecision,
 )
 from .persistence import RecoveryEventRecord, SQLiteRuntimeStore
+from .lifecycle import evaluate_lifecycle
 from .portfolio import PortfolioSelectionTrace, trace_rank_opportunities
 from .recovery import BrokerReconciliationReport, BrokerReconciliationRuntime
 from .regime import classify_regime
@@ -271,6 +274,12 @@ class LiveRuntimeRunner:
             at_utc=broker_time,
             allow_flatten_unresolved=True,
         )
+        self._synchronize_lifecycle_states(
+            broker_positions,
+            reconciliation_ready=bool(self.last_reconciliation_report.ready_to_resume),
+            cycle_time_utc=broker_time,
+        )
+        self._manage_lifecycle_positions(broker_positions, cycle_time_utc=broker_time)
 
         snapshots: dict[str, MarketSnapshot] = {}
         for symbol in self.config.symbols.allowlist:
@@ -408,6 +417,8 @@ class LiveRuntimeRunner:
                         pyramid_count=0,
                     )
                 )
+            if result.filled:
+                self._create_lifecycle_state_for_fill(validation.intent, result, opened_at_utc=broker_time)
 
         self._persist_execution_registry()
         reconciliation = BrokerReconciliationRuntime(self.store).reconcile(
@@ -444,6 +455,181 @@ class LiveRuntimeRunner:
     def _persist_execution_registry(self) -> None:
         assert self.execution_adapter.registry is not None
         self.store.store_execution_registry(self.execution_adapter.registry.entries_by_submission_uuid.values())
+
+    def _synchronize_lifecycle_states(
+        self,
+        broker_positions: tuple[Mapping[str, Any], ...],
+        *,
+        reconciliation_ready: bool,
+        cycle_time_utc: datetime,
+    ) -> None:
+        """Remove state only when broker reconciliation is healthy enough to be authoritative."""
+        if not reconciliation_ready:
+            return
+        open_tickets = {_position_ticket(record) for record in broker_positions}
+        for state in self.store.load_lifecycle_states():
+            if state.position_ticket in open_tickets:
+                continue
+            self.store.delete_lifecycle_state(state.position_ticket)
+            self._emit_telemetry(
+                "runtime.lifecycle_state_closed",
+                {
+                    "cycle_time_utc": cycle_time_utc.isoformat(),
+                    "position_ticket": state.position_ticket,
+                    "symbol": state.symbol,
+                    "setup_id": state.setup_id,
+                },
+            )
+
+    def _manage_lifecycle_positions(
+        self,
+        broker_positions: tuple[Mapping[str, Any], ...],
+        *,
+        cycle_time_utc: datetime,
+    ) -> None:
+        positions_by_ticket = {
+            ticket: record
+            for record in broker_positions
+            if (ticket := _position_ticket(record)) is not None
+        }
+        for state in self.store.load_lifecycle_states():
+            if state.position_ticket not in positions_by_ticket:
+                continue
+            try:
+                tick = self.bridge.latest_tick(state.symbol)
+                bid = float(tick["bid"])
+                ask = float(tick["ask"])
+                if bid <= 0.0 or ask <= 0.0:
+                    raise ConfigValidationError("Lifecycle tick has non-positive bid or ask")
+                updated = evaluate_lifecycle(
+                    state,
+                    current_price=(bid + ask) / 2.0,
+                    break_even_after_r=self.config.lifecycle.break_even_after_r,
+                )
+                if updated.current_stop == state.current_stop:
+                    continue
+                result = self.bridge.modify_position_sltp(
+                    state.position_ticket,
+                    symbol=state.symbol,
+                    sl=updated.current_stop,
+                )
+            except Exception as exc:
+                self._emit_telemetry(
+                    "runtime.lifecycle_modify_failed",
+                    {
+                        "cycle_time_utc": cycle_time_utc.isoformat(),
+                        "position_ticket": state.position_ticket,
+                        "symbol": state.symbol,
+                        "setup_id": state.setup_id,
+                        "error_class": exc.__class__.__name__,
+                        "message": str(exc),
+                    },
+                )
+                continue
+            if not result.ok:
+                self._emit_telemetry(
+                    "runtime.lifecycle_modify_failed",
+                    {
+                        "cycle_time_utc": cycle_time_utc.isoformat(),
+                        "position_ticket": state.position_ticket,
+                        "symbol": state.symbol,
+                        "setup_id": state.setup_id,
+                        "broker_code": result.response_class,
+                        "message": result.message,
+                    },
+                )
+                continue
+            self.store.store_lifecycle_state(updated)
+            self._emit_telemetry(
+                "runtime.lifecycle_stop_updated",
+                {
+                    "cycle_time_utc": cycle_time_utc.isoformat(),
+                    "position_ticket": state.position_ticket,
+                    "symbol": state.symbol,
+                    "setup_id": state.setup_id,
+                    "previous_stop": state.current_stop,
+                    "current_stop": updated.current_stop,
+                },
+            )
+
+    def _create_lifecycle_state_for_fill(
+        self,
+        intent: ExecutionIntent,
+        result: ExecutionResult,
+        *,
+        opened_at_utc: datetime,
+    ) -> None:
+        record = self._resolve_filled_position(intent, result)
+        if record is None:
+            self._emit_telemetry(
+                "runtime.lifecycle_state_unavailable",
+                {
+                    "cycle_time_utc": opened_at_utc.isoformat(),
+                    "setup_id": intent.setup_id,
+                    "symbol": intent.symbol,
+                    "submission_uuid": intent.submission_uuid,
+                    "broker_ticket": result.ticket,
+                    "reason": "position_ticket_unresolved",
+                },
+            )
+            return
+        position_ticket = _position_ticket(record)
+        if position_ticket is None:
+            return
+        initial_r_distance = abs(intent.decision_price - intent.stop_loss_price)
+        if initial_r_distance <= 0.0:
+            self._emit_telemetry(
+                "runtime.lifecycle_state_unavailable",
+                {
+                    "cycle_time_utc": opened_at_utc.isoformat(),
+                    "setup_id": intent.setup_id,
+                    "symbol": intent.symbol,
+                    "submission_uuid": intent.submission_uuid,
+                    "broker_ticket": result.ticket,
+                    "reason": "invalid_initial_r_distance",
+                },
+            )
+            return
+        state = LifecycleState(
+            position_ticket=position_ticket,
+            setup_id=intent.setup_id,
+            symbol=intent.symbol,
+            opened_at_utc=opened_at_utc,
+            direction=intent.direction,
+            entry_price=intent.decision_price,
+            initial_stop=intent.stop_loss_price,
+            initial_r_distance=initial_r_distance,
+            current_stop=intent.stop_loss_price,
+            partial_taken=False,
+            trail_active=False,
+            pyramid_count=0,
+            thesis_expiry_utc=opened_at_utc + timedelta(minutes=self.config.lifecycle.thesis_ttl_minutes),
+            orphan_recovered=False,
+        )
+        self.store.store_lifecycle_state(state)
+        self._emit_telemetry(
+            "runtime.lifecycle_state_created",
+            {
+                "cycle_time_utc": opened_at_utc.isoformat(),
+                "position_ticket": state.position_ticket,
+                "setup_id": state.setup_id,
+                "symbol": state.symbol,
+                "initial_stop": state.initial_stop,
+            },
+        )
+
+    def _resolve_filled_position(
+        self,
+        intent: ExecutionIntent,
+        result: ExecutionResult,
+    ) -> Mapping[str, Any] | None:
+        records = self.bridge.query_positions(ticket=result.ticket) if result.ticket is not None else ()
+        candidates = [record for record in records if _position_matches_intent(record, intent)]
+        if len(candidates) == 1:
+            return candidates[0]
+        records = self.bridge.query_positions()
+        candidates = [record for record in records if _position_matches_intent(record, intent)]
+        return candidates[0] if len(candidates) == 1 else None
 
     def _store_runtime_state(
         self,
@@ -786,6 +972,28 @@ def _direction_from_record(record: Mapping[str, Any]) -> Direction | None:
         if value == 1:
             return Direction.SHORT
     return None
+
+
+def _position_ticket(record: Mapping[str, Any]) -> int | None:
+    raw_ticket = record.get("position_ticket", record.get("ticket"))
+    try:
+        ticket = int(raw_ticket)
+    except (TypeError, ValueError):
+        return None
+    return ticket if ticket > 0 else None
+
+
+def _position_matches_intent(record: Mapping[str, Any], intent: ExecutionIntent) -> bool:
+    if str(record.get("symbol", "")).strip().upper() != intent.symbol.upper():
+        return False
+    if _direction_from_record(record) is not intent.direction:
+        return False
+    if str(record.get("setup_id", "")) == intent.setup_id:
+        return True
+    if str(record.get("submission_uuid", "")) == intent.submission_uuid:
+        return True
+    comment = str(record.get("comment", ""))
+    return comment == f"TSP_V2|{intent.setup_id}|{intent.submission_uuid}"
 
 
 def _correlation_group(symbol: str) -> str:

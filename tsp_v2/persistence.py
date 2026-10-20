@@ -12,7 +12,7 @@ from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from .config_schema import ConfigValidationError
 from .enums import ExecutionRegistryState, GovernorState, HealthState, RuntimeMode
-from .models import ExecutionRegistryEntry, GovernorDecision, PositionSnapshot
+from .models import ExecutionRegistryEntry, GovernorDecision, LifecycleState, PositionSnapshot
 
 
 SCHEMA_VERSION = "1"
@@ -340,6 +340,50 @@ class SQLiteRuntimeStore:
             rows = conn.execute("SELECT * FROM positions ORDER BY setup_id ASC").fetchall()
         return tuple(dict(row) for row in rows)
 
+    def store_lifecycle_state(self, state: LifecycleState) -> None:
+        with self._write_transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO lifecycle_state (
+                    position_ticket, setup_id, symbol, opened_at_utc, direction,
+                    entry_price, initial_stop, initial_r_distance, current_stop,
+                    partial_taken, trail_active, pyramid_count, thesis_expiry_utc,
+                    orphan_recovered
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(position_ticket) DO UPDATE SET
+                    current_stop=excluded.current_stop,
+                    partial_taken=excluded.partial_taken,
+                    trail_active=excluded.trail_active,
+                    pyramid_count=excluded.pyramid_count,
+                    orphan_recovered=excluded.orphan_recovered
+                """,
+                (
+                    state.position_ticket,
+                    state.setup_id,
+                    state.symbol,
+                    _ensure_utc(state.opened_at_utc, field_name="opened_at_utc").isoformat(),
+                    state.direction.value,
+                    state.entry_price,
+                    state.initial_stop,
+                    state.initial_r_distance,
+                    state.current_stop,
+                    int(state.partial_taken),
+                    int(state.trail_active),
+                    state.pyramid_count,
+                    _ensure_utc(state.thesis_expiry_utc, field_name="thesis_expiry_utc").isoformat(),
+                    int(state.orphan_recovered),
+                ),
+            )
+
+    def load_lifecycle_states(self) -> tuple[LifecycleState, ...]:
+        with self._read_connection() as conn:
+            rows = conn.execute("SELECT * FROM lifecycle_state ORDER BY position_ticket ASC").fetchall()
+        return tuple(_row_to_lifecycle_state(row) for row in rows)
+
+    def delete_lifecycle_state(self, position_ticket: int) -> None:
+        with self._write_transaction() as conn:
+            conn.execute("DELETE FROM lifecycle_state WHERE position_ticket = ?", (int(position_ticket),))
+
     def store_health_state(self, component: str, state: HealthState, payload: Mapping[str, Any] | None = None) -> None:
         with self._write_transaction() as conn:
             conn.execute(
@@ -454,6 +498,25 @@ def _row_to_execution_entry(row: sqlite3.Row) -> ExecutionRegistryEntry:
         cycle_time_utc=_parse_utc_or_none(row["cycle_time_utc"]),
         expires_at_utc=_parse_utc_or_none(row["expires_at_utc"]),
         broker_ticket=None if row["broker_ticket"] is None else int(row["broker_ticket"]),
+    )
+
+
+def _row_to_lifecycle_state(row: sqlite3.Row) -> LifecycleState:
+    return LifecycleState(
+        position_ticket=int(row["position_ticket"]),
+        setup_id=str(row["setup_id"]),
+        symbol=str(row["symbol"]),
+        opened_at_utc=_parse_utc(str(row["opened_at_utc"])),
+        direction=_direction_from_raw(str(row["direction"])),
+        entry_price=float(row["entry_price"]),
+        initial_stop=float(row["initial_stop"]),
+        initial_r_distance=float(row["initial_r_distance"]),
+        current_stop=float(row["current_stop"]),
+        partial_taken=bool(row["partial_taken"]),
+        trail_active=bool(row["trail_active"]),
+        pyramid_count=int(row["pyramid_count"]),
+        thesis_expiry_utc=_parse_utc(str(row["thesis_expiry_utc"])),
+        orphan_recovered=bool(row["orphan_recovered"]),
     )
 
 

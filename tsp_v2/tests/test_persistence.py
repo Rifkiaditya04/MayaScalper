@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import tempfile
 import unittest
@@ -7,9 +8,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from tsp_v2.config import load_config
-from tsp_v2.enums import ExecutionRegistryState, GovernorState, PaceClassification
+from tsp_v2.enums import Direction, ExecutionRegistryState, GovernorState, PaceClassification
 from tsp_v2.live_runtime import LiveRuntimeRunner
-from tsp_v2.models import ExecutionRegistryEntry, GovernorDecision
+from tsp_v2.models import ExecutionRegistryEntry, GovernorDecision, LifecycleState
 from tsp_v2.persistence import AccountStateRecord, SQLiteRuntimeStore, SCHEMA_VERSION
 
 
@@ -131,6 +132,40 @@ class PersistenceTests(unittest.TestCase):
                 record = store.load_governor_state()
                 self.assertIsNotNone(record)
                 self.assertEqual(record.state, GovernorState.NORMAL)
+            finally:
+                store.close()
+
+    def test_lifecycle_state_roundtrip_update_and_delete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = _load_config(root)
+            store = SQLiteRuntimeStore(config.persistence.sqlite_path)
+            try:
+                store.initialize()
+                opened_at = datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc)
+                original = LifecycleState(
+                    position_ticket=101,
+                    setup_id="setup-101",
+                    symbol="XAUUSD",
+                    opened_at_utc=opened_at,
+                    direction=Direction.LONG,
+                    entry_price=100.0,
+                    initial_stop=98.0,
+                    initial_r_distance=2.0,
+                    current_stop=98.0,
+                    partial_taken=False,
+                    trail_active=False,
+                    pyramid_count=0,
+                    thesis_expiry_utc=datetime(2026, 5, 29, 10, 0, 0, tzinfo=timezone.utc),
+                    orphan_recovered=False,
+                )
+                store.store_lifecycle_state(original)
+                updated = replace(original, current_stop=100.0, trail_active=True)
+                store.store_lifecycle_state(updated)
+                states = store.load_lifecycle_states()
+                self.assertEqual(states, (updated,))
+                store.delete_lifecycle_state(101)
+                self.assertEqual(store.load_lifecycle_states(), ())
             finally:
                 store.close()
 

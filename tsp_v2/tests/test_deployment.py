@@ -19,7 +19,7 @@ from tsp_v2.deployment import DeploymentRuntime, SingleInstanceLock
 from tsp_v2.enums import ClockHealth, Direction, GovernorState, HealthState, PaceClassification, RiskAction, SignalFamily
 from tsp_v2.live_runtime import LiveCycleReport, LiveRuntimeRunner
 from tsp_v2.persistence import SQLiteRuntimeStore
-from tsp_v2.models import ExecutionResult, GovernorDecision, RiskDecision, SignalDecision, SignalEvaluation
+from tsp_v2.models import ExecutionIntent, ExecutionResult, GovernorDecision, LifecycleState, RiskDecision, SignalDecision, SignalEvaluation
 
 
 BASE_TEMPLATE = """
@@ -108,11 +108,14 @@ class FakeLiveBridge:
     connect_calls: int = 0
     position_ticket: int = 0
     positions_payload: list[dict[str, object]] = None
+    sltp_requests: list[dict[str, object]] = None
     mt5_module: object | None = None
 
     def __post_init__(self) -> None:
         if self.positions_payload is None:
             self.positions_payload = []
+        if self.sltp_requests is None:
+            self.sltp_requests = []
 
     @property
     def bridge(self) -> FakeLiveBridge:
@@ -218,6 +221,9 @@ class FakeLiveBridge:
             "volume": 1.0,
         }
 
+    def latest_tick(self, symbol: str) -> dict[str, object]:
+        return self.get_latest_tick(symbol)
+
     def get_rates(
         self,
         symbol: str,
@@ -284,6 +290,29 @@ class FakeLiveBridge:
             request=dict(request),
             response=response,
             diagnostics={"retcode": "DONE"},
+        )
+
+    def modify_position_sltp(self, position_ticket: int, *, symbol: str, sl: float, tp: float | None = None) -> MT5TradeResult:
+        request: dict[str, object] = {
+            "position": position_ticket,
+            "symbol": symbol,
+            "sl": sl,
+        }
+        if tp is not None:
+            request["tp"] = tp
+        self.sltp_requests.append(request)
+        return MT5TradeResult(
+            ok=True,
+            failure_class="",
+            response_class="OK",
+            retryable=False,
+            fatal=False,
+            terminal=True,
+            message="stop updated",
+            ticket=position_ticket,
+            request=request,
+            response={"retcode": "DONE", "position": position_ticket},
+            diagnostics={},
         )
 
 
@@ -690,6 +719,118 @@ class DeploymentTests(unittest.TestCase):
                 self.assertEqual(payload["decision"], "skip")
                 self.assertEqual(payload["current_m5_close"], latest.isoformat())
                 self.assertEqual(payload["last_processed_m5_close"], latest.isoformat())
+            finally:
+                store.close()
+
+    def test_lifecycle_runtime_moves_stop_after_one_point_five_r(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = _load_config(root, allow_live_execution=True)
+            store = SQLiteRuntimeStore(config.persistence.sqlite_path)
+            store.initialize()
+            store.set_config_fingerprint(config.fingerprint)
+            try:
+                broker_time = datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc)
+                bridge = FakeLiveBridge(
+                    broker_time_value=broker_time,
+                    position_ticket=42,
+                    positions_payload=[{"ticket": 42, "position_ticket": 42, "symbol": "XAUUSD", "direction": "LONG"}],
+                )
+                store.store_lifecycle_state(
+                    LifecycleState(
+                        position_ticket=42,
+                        setup_id="setup-42",
+                        symbol="XAUUSD",
+                        opened_at_utc=broker_time,
+                        direction=Direction.LONG,
+                        entry_price=137.0,
+                        initial_stop=135.0,
+                        initial_r_distance=2.0,
+                        current_stop=137.0,
+                        partial_taken=False,
+                        trail_active=True,
+                        pyramid_count=0,
+                        thesis_expiry_utc=broker_time + timedelta(minutes=60),
+                        orphan_recovered=False,
+                    )
+                )
+                runner = LiveRuntimeRunner(
+                    config=config,
+                    store=store,
+                    bridge=bridge,
+                    market_adapter=SimpleNamespace(),
+                    execution_adapter=SimpleNamespace(registry=SimpleNamespace(entries_by_setup_id={}, entries_by_submission_uuid={})),
+                    bootstrap_report=SimpleNamespace(ready_to_resume=True),
+                )
+                runner._manage_lifecycle_positions(tuple(bridge.positions_payload), cycle_time_utc=broker_time)
+                self.assertEqual(len(bridge.sltp_requests), 1)
+                self.assertEqual(bridge.sltp_requests[0]["position"], 42)
+                self.assertAlmostEqual(float(bridge.sltp_requests[0]["sl"]), 138.05)
+                self.assertAlmostEqual(store.load_lifecycle_states()[0].current_stop, 138.05)
+            finally:
+                store.close()
+
+    def test_filled_execution_creates_lifecycle_state_from_verified_position(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = _load_config(root, allow_live_execution=True)
+            store = SQLiteRuntimeStore(config.persistence.sqlite_path)
+            store.initialize()
+            store.set_config_fingerprint(config.fingerprint)
+            try:
+                broker_time = datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc)
+                bridge = FakeLiveBridge(
+                    broker_time_value=broker_time,
+                    positions_payload=[{
+                        "ticket": 77,
+                        "position_ticket": 77,
+                        "symbol": "XAUUSD",
+                        "direction": "LONG",
+                        "setup_id": "setup-77",
+                        "submission_uuid": "submission-77",
+                    }],
+                )
+                runner = LiveRuntimeRunner(
+                    config=config,
+                    store=store,
+                    bridge=bridge,
+                    market_adapter=SimpleNamespace(),
+                    execution_adapter=SimpleNamespace(registry=SimpleNamespace(entries_by_setup_id={}, entries_by_submission_uuid={})),
+                    bootstrap_report=SimpleNamespace(ready_to_resume=True),
+                )
+                intent = ExecutionIntent(
+                    setup_id="setup-77",
+                    signal_family=SignalFamily.TREND_CONTINUATION,
+                    symbol="XAUUSD",
+                    direction=Direction.LONG,
+                    decision_price=100.0,
+                    sized_volume=0.1,
+                    stop_loss_price=98.0,
+                    submission_uuid="submission-77",
+                    cycle_time_utc=broker_time,
+                )
+                result = ExecutionResult(
+                    accepted=True,
+                    rejected=False,
+                    filled=True,
+                    partial_fill=False,
+                    ticket=77,
+                    broker_code="DONE",
+                    classification="FILLED",
+                    retryable=False,
+                    fatal=False,
+                    terminal=True,
+                    message="filled",
+                    submission_uuid=intent.submission_uuid,
+                    setup_id=intent.setup_id,
+                    symbol=intent.symbol,
+                )
+                runner._create_lifecycle_state_for_fill(intent, result, opened_at_utc=broker_time)
+                states = store.load_lifecycle_states()
+                self.assertEqual(len(states), 1)
+                self.assertEqual(states[0].position_ticket, 77)
+                self.assertEqual(states[0].initial_stop, 98.0)
+                self.assertEqual(states[0].initial_r_distance, 2.0)
             finally:
                 store.close()
 
