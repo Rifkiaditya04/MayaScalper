@@ -77,6 +77,8 @@ class ExecutionAdapterTests(unittest.TestCase):
         self.assertEqual(result.broker_code, "DONE")
         self.assertEqual(result.classification, "OK")
         self.assertEqual(adapter.registry.entries_by_submission_uuid[intent.submission_uuid].state, ExecutionRegistryState.FILLED)
+        self.assertEqual(adapter.bridge.place_order_requests[0]["sl"], intent.stop_loss_price)
+        self.assertNotIn("tp", adapter.bridge.place_order_requests[0])
 
     def test_execute_maps_partial_fill(self) -> None:
         adapter, intent = self._build_adapter(

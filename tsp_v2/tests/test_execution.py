@@ -37,6 +37,23 @@ class ExecutionTests(unittest.TestCase):
         self.assertTrue(result.accepted)
         self.assertIsNotNone(result.intent)
         self.assertEqual(result.intent.signal_family, SignalFamily.TREND_CONTINUATION)
+        self.assertEqual(result.intent.stop_loss_price, risk.invalidation_price)
+
+    def test_build_intent_rejects_stop_on_wrong_side(self) -> None:
+        snapshot = _snapshot()
+        signal = _signal(snapshot, SignalFamily.TREND_CONTINUATION)
+        risk = _risk(snapshot)
+        risk = RiskDecision(
+            action=risk.action,
+            risk_multiplier=risk.risk_multiplier,
+            sized_volume=risk.sized_volume,
+            invalidation_price=100.2,
+            hard_block_reason=risk.hard_block_reason,
+            governor_adjusted_state=risk.governor_adjusted_state,
+        )
+
+        with self.assertRaisesRegex(ConfigValidationError, "below decision_price"):
+            build_execution_intent(signal, risk, decision_price=100.1, cycle_time_utc=snapshot.cycle_time_utc)
 
     def test_validate_rejects_duplicate_intent(self) -> None:
         snapshot = _snapshot()

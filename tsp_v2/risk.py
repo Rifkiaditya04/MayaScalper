@@ -209,6 +209,38 @@ def evaluate_risk(
         action = RiskAction.ENTER
 
     invalidation_price = _compute_invalidation_price(snapshot, signal)
+    entry_price = _mid_price(snapshot)
+    stop_is_on_loss_side = (
+        signal.direction is Direction.LONG and invalidation_price < entry_price
+    ) or (
+        signal.direction is Direction.SHORT and invalidation_price > entry_price
+    )
+    diagnostics["entry_price"] = round(entry_price, 8)
+    diagnostics["invalidation_price"] = round(invalidation_price, 8)
+    if not stop_is_on_loss_side:
+        return _decision(
+            action=RiskAction.BLOCK,
+            risk_multiplier=0.0,
+            sized_volume=0.0,
+            invalidation_price=invalidation_price,
+            hard_block_reason="invalid_stop_direction",
+            governor_adjusted_state=governor.state,
+            diagnostics=diagnostics,
+        )
+    min_stop_distance = snapshot.contract.stop_level_points * snapshot.contract.point
+    actual_stop_distance = abs(entry_price - invalidation_price)
+    diagnostics["min_stop_distance"] = round(min_stop_distance, 8)
+    diagnostics["actual_stop_distance"] = round(actual_stop_distance, 8)
+    if actual_stop_distance < min_stop_distance:
+        return _decision(
+            action=RiskAction.BLOCK,
+            risk_multiplier=0.0,
+            sized_volume=0.0,
+            invalidation_price=invalidation_price,
+            hard_block_reason="stop_below_broker_minimum",
+            governor_adjusted_state=governor.state,
+            diagnostics=diagnostics,
+        )
     sized_volume = _size_volume(
         snapshot=snapshot,
         target_risk_pct=target_risk_pct,

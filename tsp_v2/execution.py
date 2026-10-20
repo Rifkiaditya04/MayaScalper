@@ -420,6 +420,12 @@ def build_execution_intent(
         raise ConfigValidationError(f"Risk decision blocks execution: {risk.hard_block_reason}")
     if decision_price <= 0.0:
         raise ConfigValidationError("decision_price must be positive")
+    if risk.invalidation_price <= 0.0:
+        raise ConfigValidationError("stop_loss_price must be positive")
+    if signal.direction is Direction.LONG and risk.invalidation_price >= decision_price:
+        raise ConfigValidationError("Long execution stop_loss_price must be below decision_price")
+    if signal.direction is Direction.SHORT and risk.invalidation_price <= decision_price:
+        raise ConfigValidationError("Short execution stop_loss_price must be above decision_price")
 
     cycle_utc = _ensure_utc(cycle_time_utc or _cycle_time_from_signal(signal), field_name="cycle_time_utc")
     submission_uuid = _build_submission_uuid(
@@ -436,6 +442,7 @@ def build_execution_intent(
         direction=signal.direction,
         decision_price=decision_price,
         sized_volume=risk.sized_volume,
+        stop_loss_price=risk.invalidation_price,
         submission_uuid=submission_uuid,
         cycle_time_utc=cycle_utc,
     )

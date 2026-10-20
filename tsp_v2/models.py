@@ -206,8 +206,10 @@ class ExecutionIntent:
     direction: Direction
     decision_price: float
     sized_volume: float
+    stop_loss_price: float
     submission_uuid: str
     cycle_time_utc: datetime
+    take_profit_price: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

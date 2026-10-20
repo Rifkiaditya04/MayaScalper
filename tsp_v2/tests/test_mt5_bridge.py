@@ -24,6 +24,7 @@ class FakeMT5:
     TRADE_ACTION_DEAL = 10
     TRADE_ACTION_REMOVE = 11
     TRADE_ACTION_MODIFY = 12
+    TRADE_ACTION_SLTP = 13
     ORDER_TIME_GTC = 20
     ORDER_FILLING_RETURN = 30
     TRADE_RETCODE_DONE = 10009
@@ -347,6 +348,42 @@ class MT5BridgeTests(unittest.TestCase):
         self.assertFalse(result.retryable)
         self.assertEqual(result.failure_class, "INVALID_VOLUME")
         self.assertEqual(result.response_class, "BLOCK_EXECUTION")
+
+    def test_deal_request_preserves_broker_side_stop_loss(self) -> None:
+        fake = FakeMT5()
+        bridge = MT5Bridge(mt5_module=fake)
+        bridge.connect()
+
+        result = bridge.place_order(
+            {
+                "action": fake.TRADE_ACTION_DEAL,
+                "symbol": "XAUUSD",
+                "volume": 0.10,
+                "type": fake.ORDER_TYPE_BUY,
+                "price": 2350.0,
+                "sl": 2345.0,
+            }
+        )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(fake.order_requests[-1]["sl"], 2345.0)
+
+    def test_modify_position_sltp_sends_sltp_request_without_deal_fields(self) -> None:
+        fake = FakeMT5()
+        bridge = MT5Bridge(mt5_module=fake)
+        bridge.connect()
+
+        result = bridge.modify_position_sltp(10, symbol="XAUUSD", sl=2345.0, tp=2360.0)
+
+        self.assertTrue(result.ok)
+        request = fake.order_requests[-1]
+        self.assertEqual(request["action"], fake.TRADE_ACTION_SLTP)
+        self.assertEqual(request["position"], 10)
+        self.assertEqual(request["symbol"], "XAUUSD")
+        self.assertEqual(request["sl"], 2345.0)
+        self.assertEqual(request["tp"], 2360.0)
+        self.assertNotIn("volume", request)
+        self.assertNotIn("type", request)
 
     def test_query_positions_and_orders_return_empty_tuples_when_unavailable_without_filters(self) -> None:
         fake = FakeMT5()

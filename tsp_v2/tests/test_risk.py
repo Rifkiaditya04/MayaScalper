@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import unittest
+from unittest.mock import patch
 
 from tsp_v2.enums import (
     Direction,
@@ -126,6 +128,32 @@ class RiskTests(unittest.TestCase):
         self.assertEqual(result.action, RiskAction.BLOCK)
         self.assertEqual(result.hard_block_reason, "max_positions")
 
+    def test_stop_below_broker_minimum_blocks_before_sizing(self) -> None:
+        snapshot = _snapshot(symbol="XAUUSD")
+        snapshot = replace(snapshot, contract=replace(snapshot.contract, stop_level_points=10_000))
+        signal = _signal(snapshot, family=SignalFamily.TREND_CONTINUATION, score=0.82)
+        with patch("tsp_v2.risk._size_volume") as size_volume:
+            result = evaluate_risk(snapshot, signal, _governor(GovernorState.NORMAL))
+
+        self.assertEqual(result.action, RiskAction.BLOCK)
+        self.assertEqual(result.sized_volume, 0.0)
+        self.assertEqual(result.hard_block_reason, "stop_below_broker_minimum")
+        self.assertLess(result.diagnostics["actual_stop_distance"], result.diagnostics["min_stop_distance"])
+        size_volume.assert_not_called()
+
+    def test_stop_on_profitable_side_blocks_before_sizing(self) -> None:
+        snapshot = _snapshot(symbol="XAUUSD")
+        signal = _signal(snapshot, family=SignalFamily.TREND_CONTINUATION, score=0.82)
+        with patch("tsp_v2.risk._compute_invalidation_price", return_value=131.0), patch(
+            "tsp_v2.risk._size_volume"
+        ) as size_volume:
+            result = evaluate_risk(snapshot, signal, _governor(GovernorState.NORMAL))
+
+        self.assertEqual(result.action, RiskAction.BLOCK)
+        self.assertEqual(result.sized_volume, 0.0)
+        self.assertEqual(result.hard_block_reason, "invalid_stop_direction")
+        size_volume.assert_not_called()
+
 
 def _signal(
     snapshot: MarketSnapshot,
@@ -167,8 +195,10 @@ def _snapshot(*, symbol: str) -> MarketSnapshot:
     return MarketSnapshot(
         cycle_time_utc=cycle_time,
         symbol=symbol,
-        tick_bid=100.0,
-        tick_ask=100.2,
+        # The 70 generated M5 bars trend from 100 to roughly 128. Keep the
+        # live tick aligned so a LONG structural stop is actually below entry.
+        tick_bid=130.0,
+        tick_ask=130.2,
         spread_points=2.0,
         spread_ratio=1.0,
         spread_health=HealthState.GREEN,

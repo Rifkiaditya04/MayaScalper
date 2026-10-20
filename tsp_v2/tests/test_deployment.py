@@ -210,9 +210,11 @@ class FakeLiveBridge:
             "symbol": symbol.upper(),
             "time": self.broker_time_value,
             "timestamp": self.broker_time_value,
-            "bid": 100.0,
-            "ask": 100.1,
-            "last": 100.05,
+            # Keep the live-entry fixture aligned with the latest bullish M5
+            # history produced below so its structural stop is below entry.
+            "bid": 140.0,
+            "ask": 140.1,
+            "last": 140.05,
             "volume": 1.0,
         }
 
@@ -849,6 +851,10 @@ class DeploymentTests(unittest.TestCase):
             store.initialize()
             store.set_config_fingerprint(config.fingerprint)
             try:
+                execution_adapter = SimpleNamespace(
+                    registry=SimpleNamespace(entries_by_setup_id={}, entries_by_submission_uuid={}),
+                    execute=unittest.mock.Mock(side_effect=AssertionError("execute should not be called")),
+                )
                 runner = LiveRuntimeRunner(
                     config=config,
                     store=store,
@@ -857,10 +863,7 @@ class DeploymentTests(unittest.TestCase):
                         get_broker_time=lambda: datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc),
                         market_status=lambda now_utc: SimpleNamespace(ok=True, health=HealthState.GREEN, message="ok"),
                     ),
-                    execution_adapter=SimpleNamespace(
-                        registry=SimpleNamespace(entries_by_setup_id={}, entries_by_submission_uuid={}),
-                        execute=unittest.mock.Mock(side_effect=AssertionError("execute should not be called")),
-                    ),
+                    execution_adapter=execution_adapter,
                     bootstrap_report=SimpleNamespace(ready_to_resume=True),
                 )
                 broker_time = datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc)
@@ -905,7 +908,7 @@ class DeploymentTests(unittest.TestCase):
                             risk_multiplier=0.0,
                             sized_volume=0.0,
                             invalidation_price=0.0,
-                            hard_block_reason="test",
+                            hard_block_reason="stop_below_broker_minimum",
                             governor_adjusted_state=GovernorState.NORMAL,
                             diagnostics={},
                         ),
@@ -964,6 +967,7 @@ class DeploymentTests(unittest.TestCase):
                 runtime_payload = json.loads(runtime_rows[0]["payload_json"])
                 self.assertEqual(runtime_payload["selected_signal_count"], 1)
                 self.assertEqual(runtime_payload["execution_count"], 0)
+                execution_adapter.execute.assert_not_called()
             finally:
                 store.close()
 

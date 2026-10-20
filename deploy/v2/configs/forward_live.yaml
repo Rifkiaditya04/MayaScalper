@@ -16,4 +16,4 @@ deployment:
   runtime_root: runtime/forward_live
   log_root: logs/forward_live
   report_root: reports/forward_live
-  allow_live_execution: true
+  allow_live_execution: false

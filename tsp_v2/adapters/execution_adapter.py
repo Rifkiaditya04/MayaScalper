@@ -90,6 +90,12 @@ class MT5ExecutionAdapter:
             raise ConfigValidationError("Execution intent sized_volume must be positive")
         if intent.decision_price <= 0.0:
             raise ConfigValidationError("Execution intent decision_price must be positive")
+        if intent.stop_loss_price <= 0.0:
+            raise ConfigValidationError("Execution intent stop_loss_price must be positive")
+        if intent.direction is Direction.LONG and intent.stop_loss_price >= intent.decision_price:
+            raise ConfigValidationError("Long execution stop_loss_price must be below decision_price")
+        if intent.direction is Direction.SHORT and intent.stop_loss_price <= intent.decision_price:
+            raise ConfigValidationError("Short execution stop_loss_price must be above decision_price")
         if not intent.setup_id.strip():
             raise ConfigValidationError("Execution intent setup_id must be non-empty")
         if not intent.submission_uuid.strip():
@@ -130,12 +136,15 @@ class MT5ExecutionAdapter:
             "volume": intent.sized_volume,
             "type": order_type,
             "price": intent.decision_price,
+            "sl": intent.stop_loss_price,
             "deviation": self.default_deviation,
             "comment": f"TSP_V2|{intent.setup_id}|{intent.submission_uuid}",
             "type_time": type_time,
         }
         if default_filling is not None:
             request["type_filling"] = default_filling
+        if intent.take_profit_price is not None:
+            request["tp"] = intent.take_profit_price
         return request
 
     def _build_execution_result(

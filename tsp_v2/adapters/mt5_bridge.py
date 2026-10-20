@@ -1326,6 +1326,31 @@ class MT5Bridge:
     def modify_order(self, request: Mapping[str, Any]) -> MT5TradeResult:
         return self.place_order(request)
 
+    def modify_position_sltp(
+        self,
+        position_ticket: int,
+        *,
+        symbol: str,
+        sl: float,
+        tp: float | None = None,
+    ) -> MT5TradeResult:
+        if int(position_ticket) <= 0:
+            raise ConfigValidationError("SLTP modification requires a positive position ticket")
+        if sl <= 0.0:
+            raise ConfigValidationError("SLTP modification requires a positive stop loss")
+        if tp is not None and tp <= 0.0:
+            raise ConfigValidationError("SLTP take profit must be positive when provided")
+        mt5 = self._require_module()
+        request: dict[str, Any] = {
+            "action": getattr(mt5, "TRADE_ACTION_SLTP", "TRADE_ACTION_SLTP"),
+            "position": int(position_ticket),
+            "symbol": _require_symbol(symbol),
+            "sl": float(sl),
+        }
+        if tp is not None:
+            request["tp"] = float(tp)
+        return self.place_order(request)
+
     def cancel_order(self, order_ticket: int, *, comment: str | None = None) -> MT5TradeResult:
         mt5 = self._require_module()
         request = {
@@ -1665,17 +1690,34 @@ def _default_filling_mode(mt5: Any) -> Any | None:
 def _normalize_order_request(mt5: Any, request: Mapping[str, Any]) -> dict[str, Any]:
     normalized = dict(request)
     symbol = _require_symbol(normalized.get("symbol"))
+    action = normalized.get("action")
+    if action is None:
+        action = getattr(mt5, "TRADE_ACTION_DEAL", "TRADE_ACTION_DEAL")
+        normalized["action"] = action
+    normalized["symbol"] = symbol
+    sltp_action = getattr(mt5, "TRADE_ACTION_SLTP", "TRADE_ACTION_SLTP")
+    if action == sltp_action:
+        if "position" not in normalized:
+            raise ConfigValidationError("SLTP request requires 'position'")
+        position = int(normalized["position"])
+        if position <= 0:
+            raise ConfigValidationError("SLTP request position must be positive")
+        has_sl = normalized.get("sl") is not None
+        has_tp = normalized.get("tp") is not None
+        if not has_sl and not has_tp:
+            raise ConfigValidationError("SLTP request requires 'sl' or 'tp'")
+        normalized["position"] = position
+        if has_sl:
+            normalized["sl"] = float(normalized["sl"])
+        if has_tp:
+            normalized["tp"] = float(normalized["tp"])
+        return normalized
     volume = float(normalized.get("volume", 0.0))
     if volume <= 0.0:
         raise ConfigValidationError("Order request volume must be positive")
     order_type = normalized.get("type")
     if order_type is None:
         raise ConfigValidationError("Order request requires 'type'")
-    action = normalized.get("action")
-    if action is None:
-        action = getattr(mt5, "TRADE_ACTION_DEAL", "TRADE_ACTION_DEAL")
-        normalized["action"] = action
-    normalized["symbol"] = symbol
     normalized["volume"] = volume
     if "comment" in normalized and normalized["comment"] is not None:
         normalized["comment"] = str(normalized["comment"])
