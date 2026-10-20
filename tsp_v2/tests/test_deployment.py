@@ -767,6 +767,75 @@ class DeploymentTests(unittest.TestCase):
                 self.assertEqual(bridge.sltp_requests[0]["position"], 42)
                 self.assertAlmostEqual(float(bridge.sltp_requests[0]["sl"]), 138.05)
                 self.assertAlmostEqual(store.load_lifecycle_states()[0].current_stop, 138.05)
+                telemetry_db = sqlite3.connect(config.persistence.sqlite_path)
+                try:
+                    row = telemetry_db.execute(
+                        "SELECT payload_json FROM telemetry_index WHERE topic = 'runtime.lifecycle_price_sample'"
+                    ).fetchone()
+                finally:
+                    telemetry_db.close()
+                self.assertIsNotNone(row)
+                assert row is not None
+                sample = json.loads(row[0])
+                self.assertEqual(sample["position_ticket"], 42)
+                self.assertAlmostEqual(sample["current_price"], 140.05)
+                self.assertEqual(sample["current_stop"], 137.0)
+            finally:
+                store.close()
+
+    def test_lifecycle_runtime_samples_open_position_without_stop_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = _load_config(root, allow_live_execution=True)
+            store = SQLiteRuntimeStore(config.persistence.sqlite_path)
+            store.initialize()
+            store.set_config_fingerprint(config.fingerprint)
+            try:
+                broker_time = datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc)
+                bridge = FakeLiveBridge(
+                    broker_time_value=broker_time,
+                    position_ticket=43,
+                    positions_payload=[{"ticket": 43, "position_ticket": 43, "symbol": "XAUUSD", "direction": "LONG"}],
+                )
+                store.store_lifecycle_state(
+                    LifecycleState(
+                        position_ticket=43,
+                        setup_id="setup-43",
+                        symbol="XAUUSD",
+                        opened_at_utc=broker_time,
+                        direction=Direction.LONG,
+                        entry_price=140.0,
+                        initial_stop=138.0,
+                        initial_r_distance=2.0,
+                        current_stop=138.0,
+                        partial_taken=False,
+                        trail_active=False,
+                        pyramid_count=0,
+                        thesis_expiry_utc=broker_time + timedelta(minutes=60),
+                        orphan_recovered=False,
+                    )
+                )
+                runner = LiveRuntimeRunner(
+                    config=config,
+                    store=store,
+                    bridge=bridge,
+                    market_adapter=SimpleNamespace(),
+                    execution_adapter=SimpleNamespace(registry=SimpleNamespace(entries_by_setup_id={}, entries_by_submission_uuid={})),
+                    bootstrap_report=SimpleNamespace(ready_to_resume=True),
+                )
+                runner._manage_lifecycle_positions(tuple(bridge.positions_payload), cycle_time_utc=broker_time)
+                self.assertEqual(bridge.sltp_requests, [])
+                telemetry_db = sqlite3.connect(config.persistence.sqlite_path)
+                try:
+                    rows = telemetry_db.execute(
+                        "SELECT payload_json FROM telemetry_index WHERE topic = 'runtime.lifecycle_price_sample'"
+                    ).fetchall()
+                finally:
+                    telemetry_db.close()
+                self.assertEqual(len(rows), 1)
+                sample = json.loads(rows[0][0])
+                self.assertEqual(sample["position_ticket"], 43)
+                self.assertFalse(sample["trail_active"])
             finally:
                 store.close()
 

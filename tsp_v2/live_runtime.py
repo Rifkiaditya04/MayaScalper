@@ -501,9 +501,26 @@ class LiveRuntimeRunner:
                 ask = float(tick["ask"])
                 if bid <= 0.0 or ask <= 0.0:
                     raise ConfigValidationError("Lifecycle tick has non-positive bid or ask")
+                current_price = (bid + ask) / 2.0
+                self._emit_telemetry(
+                    "runtime.lifecycle_price_sample",
+                    {
+                        "cycle_time_utc": cycle_time_utc.isoformat(),
+                        "position_ticket": state.position_ticket,
+                        "symbol": state.symbol,
+                        "setup_id": state.setup_id,
+                        "direction": state.direction.value,
+                        "entry_price": state.entry_price,
+                        "initial_stop": state.initial_stop,
+                        "current_stop": state.current_stop,
+                        "initial_r_distance": state.initial_r_distance,
+                        "current_price": current_price,
+                        "trail_active": state.trail_active,
+                    },
+                )
                 updated = evaluate_lifecycle(
                     state,
-                    current_price=(bid + ask) / 2.0,
+                    current_price=current_price,
                     break_even_after_r=self.config.lifecycle.break_even_after_r,
                 )
                 if updated.current_stop == state.current_stop:
