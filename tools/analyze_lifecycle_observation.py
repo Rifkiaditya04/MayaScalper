@@ -119,6 +119,7 @@ def summarize_observation(observation: PositionObservation) -> dict[str, Any]:
     r_values = [item[1] for item in samples]
     mae_r = min(r_values) if r_values else None
     mfe_r = max(r_values) if r_values else None
+    final_r = r_values[-1] if r_values else None
     mae_index = r_values.index(mae_r) if mae_r is not None else None
     entry_time = observation.created_at_utc or (samples[0][0].get("_timestamp") if samples else None)
     mae_minutes = None
@@ -139,6 +140,7 @@ def summarize_observation(observation: PositionObservation) -> dict[str, Any]:
         "sample_count": len(samples),
         "mae_r": mae_r,
         "mfe_r": mfe_r,
+        "final_r": final_r,
         "mae_minutes_after_entry": mae_minutes,
         "breakeven_reached": breakeven_reached,
         "trailing_reached": trailing_reached,
@@ -155,6 +157,7 @@ def render_markdown(summaries: Iterable[dict[str, Any]], *, db_path: Path) -> st
     recovered_deep_mae = [
         row for row in measured if float(row["mae_r"]) < -0.5 and bool(row["recovered_after_mae"])
     ]
+    likely_initial_stop = [row for row in measured if float(row["final_r"]) <= -0.9]
     failures = sum(int(row["modify_failure_count"]) for row in rows)
     lines = [
         "# Lifecycle Observation Summary",
@@ -163,12 +166,12 @@ def render_markdown(summaries: Iterable[dict[str, Any]], *, db_path: Path) -> st
         "",
         "## Per Trade",
         "",
-        "| Ticket | Symbol | Setup | Direction | Samples | MAE (R) | MFE (R) | Worst MAE Minutes | Breakeven | Trailing | Modify Failures | Status |",
-        "| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- | ---: | --- |",
+        "| Ticket | Symbol | Setup | Direction | Samples | MAE (R) | MFE (R) | Final R | Worst MAE Minutes | Breakeven | Trailing | Modify Failures | Status |",
+        "| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: | --- |",
     ]
     for row in rows:
         lines.append(
-            "| {ticket} | {symbol} | {setup_id} | {direction} | {sample_count} | {mae} | {mfe} | {mae_minutes} | {breakeven} | {trailing} | {failures} | {status} |".format(
+            "| {ticket} | {symbol} | {setup_id} | {direction} | {sample_count} | {mae} | {mfe} | {final_r} | {mae_minutes} | {breakeven} | {trailing} | {failures} | {status} |".format(
                 ticket=row["ticket"],
                 symbol=row["symbol"] or "-",
                 setup_id=row["setup_id"] or "-",
@@ -176,6 +179,7 @@ def render_markdown(summaries: Iterable[dict[str, Any]], *, db_path: Path) -> st
                 sample_count=row["sample_count"],
                 mae=_fmt(row["mae_r"]),
                 mfe=_fmt(row["mfe_r"]),
+                final_r=_fmt(row["final_r"]),
                 mae_minutes=_fmt(row["mae_minutes_after_entry"]),
                 breakeven="yes" if row["breakeven_reached"] else "no",
                 trailing="yes" if row["trailing_reached"] else "no",
@@ -194,9 +198,10 @@ def render_markdown(summaries: Iterable[dict[str, Any]], *, db_path: Path) -> st
             f"- Average MAE: {_fmt(mean(mae_values) if mae_values else None)} R",
             f"- Median MAE: {_fmt(median(mae_values) if mae_values else None)} R",
             f"- Trades with MAE below -0.5R and a later recovery to >= 0R: {len(recovered_deep_mae)} ({percent:.1f}%)",
+            f"- Positions with final observed R <= -0.9: {len(likely_initial_stop)}",
             f"- lifecycle_modify_failed events: {failures}",
             "",
-            "A position is considered recovered here only when a sample after its worst MAE reaches non-negative R. This is an observational metric, not realized PnL.",
+            "A position is considered recovered here only when a sample after its worst MAE reaches non-negative R. Final observed R <= -0.9 is an observational marker only; it does not prove a broker stop-loss fill or realized PnL.",
         ]
     )
     return "\n".join(lines) + "\n"
@@ -208,8 +213,8 @@ def _fmt(value: Any) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate a read-only lifecycle MAE/MFE observation report")
-    parser.add_argument("--db", type=Path, default=Path("runtime/forward_live/db/tsp_v2_runtime.sqlite3"))
-    parser.add_argument("--output", type=Path, default=Path("reports/forward_live/lifecycle_observation_summary.md"))
+    parser.add_argument("--db", type=Path, default=Path("runtime/forward_demo/db/tsp_v2_runtime.sqlite3"))
+    parser.add_argument("--output", type=Path, default=Path("reports/forward_demo/lifecycle_observation_summary.md"))
     args = parser.parse_args()
     if not args.db.exists():
         parser.error(f"database does not exist: {args.db}")

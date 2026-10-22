@@ -24,9 +24,15 @@ logged into the intended demo/forward account and connected:
 
 It runs preflight once, then launches bounded runtime chunks. Non-zero exits
 are logged and retried after a delay. Five consecutive failures stop the
-supervisor by default. Create `runtime/forward_live/STOP` to request a clean
+supervisor by default. Create `runtime/forward_demo/STOP` to request a clean
 stop before the next chunk. The supervisor log is separate from runtime logs:
-`logs/forward_live/forward_observation_supervisor.log`.
+`logs/forward_demo/forward_observation_supervisor.log`.
+
+The default profile is `deploy/v2/configs/forward_demo.yaml`. It has an
+isolated database, lock, runtime, log, and report namespace. It enables
+execution only after preflight confirms the MT5 account reports demo mode.
+Missing, contest, or real account modes fail closed. Operators must still
+confirm the account and open positions manually before starting the supervisor.
 
 ## Analysis
 
@@ -36,15 +42,17 @@ The analyzer opens the runtime database read-only and writes a Markdown report:
 .\.venv\Scripts\python.exe tools\analyze_lifecycle_observation.py
 ```
 
-It reports MAE/MFE in initial-R units, worst-MAE timing, breakeven/trailing
-observation, lifecycle modification failures, and final observed state for
-each `position_ticket`. A "recovery" means that a later sample reaches
-non-negative R after the worst observed MAE; it is not realized PnL.
+It reports MAE/MFE and final observed R in initial-R units, worst-MAE timing,
+breakeven/trailing observation, lifecycle modification failures, and final
+observed state for each `position_ticket`. A "recovery" means that a later
+sample reaches non-negative R after the worst observed MAE; it is not realized
+PnL. A final observed R of at most -0.9 is only a marker for investigation,
+not proof that a broker stop-loss filled.
 
 ## Operational Boundary
 
 `deploy/v2/configs/forward_live.yaml` remains `allow_live_execution: false`.
-The supervisor must not be used to bypass that control. With execution disabled,
-the observation can record lifecycle telemetry for pre-existing demo positions
-but cannot create new strategy trades. Any future decision to enable demo
-execution requires a separate explicit safety gate.
+The supervisor does not bypass it; it uses the separate demo-only profile.
+`forward_demo.yaml` requires a broker-reported demo account before allowing
+execution. No operator confirmation can bypass a missing, contest, or real
+trade mode while that guard is enabled.

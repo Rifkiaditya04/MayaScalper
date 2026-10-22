@@ -38,12 +38,38 @@ class LifecycleObservationAnalysisTests(unittest.TestCase):
             summary = summarize_observation(observations[11])
             self.assertEqual(summary["mae_r"], -0.5)
             self.assertEqual(summary["mfe_r"], 1.0)
+            self.assertEqual(summary["final_r"], 1.0)
             self.assertEqual(summary["mae_minutes_after_entry"], 5.0)
             self.assertTrue(summary["breakeven_reached"])
             self.assertFalse(summary["trailing_reached"])
             self.assertTrue(summary["recovered_after_mae"])
             self.assertEqual(summary["status"], "CLOSED")
-            self.assertIn("Trades observed: 1", render_markdown([summary], db_path=db_path))
+            report = render_markdown([summary], db_path=db_path)
+            self.assertIn("Trades observed: 1", report)
+            self.assertIn("Positions with final observed R <= -0.9: 0", report)
+
+    def test_report_counts_positions_with_deep_final_observed_r(self) -> None:
+        summary = {
+            "ticket": 12,
+            "symbol": "GBPJPY",
+            "setup_id": "setup-12",
+            "direction": "SHORT",
+            "sample_count": 1,
+            "mae_r": -1.0,
+            "mfe_r": -1.0,
+            "final_r": -1.0,
+            "mae_minutes_after_entry": 5.0,
+            "breakeven_reached": False,
+            "trailing_reached": False,
+            "modify_failure_count": 0,
+            "status": "CLOSED",
+            "recovered_after_mae": False,
+        }
+
+        report = render_markdown([summary], db_path=Path("runtime.sqlite3"))
+
+        self.assertIn("Final R", report)
+        self.assertIn("Positions with final observed R <= -0.9: 1", report)
 
 
 def _sample(cycle_time_utc: str, current_price: float, *, trail_active: bool) -> dict[str, object]:

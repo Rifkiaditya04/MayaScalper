@@ -1,13 +1,13 @@
 param(
-    [string]$ConfigPath = "deploy/v2/configs/forward_live.yaml",
+    [string]$ConfigPath = "deploy/v2/configs/forward_demo.yaml",
     [string]$EnvPath = ".env",
     [string]$PythonPath = "",
     [int]$ChunkCycles = 50,
     [int]$MaxChunks = 100,
     [int]$RetryDelaySeconds = 30,
     [int]$ConsecutiveFailureLimit = 5,
-    [string]$StopFile = "runtime/forward_live/STOP",
-    [string]$LogPath = "logs/forward_live/forward_observation_supervisor.log"
+    [string]$StopFile = "runtime/forward_demo/STOP",
+    [string]$LogPath = "logs/forward_demo/forward_observation_supervisor.log"
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,7 +26,7 @@ $LogDirectory = Split-Path -Parent $LogPath
 if ($LogDirectory) { New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null }
 
 function Write-SupervisorLog([string]$Message) {
-    $Line = "$(Get-Date -AsUTC -Format 'o') $Message"
+    $Line = "$((Get-Date).ToUniversalTime().ToString('o')) $Message"
     Write-Host $Line
     Add-Content -LiteralPath $LogPath -Value $Line -Encoding utf8
 }

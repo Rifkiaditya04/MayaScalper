@@ -1,0 +1,20 @@
+bot:
+  mode: FORWARD_TEST
+  profile: FORWARD_SAFE
+symbols:
+  allowlist:
+    - GBPUSD
+    - GBPJPY
+    - EURUSD
+contest:
+  ranking_proxy_enabled: false
+persistence:
+  sqlite_path: runtime/forward_demo/db/tsp_v2_runtime.sqlite3
+  lock_path: runtime/forward_demo/locks
+  wal_enabled: true
+deployment:
+  runtime_root: runtime/forward_demo
+  log_root: logs/forward_demo
+  report_root: reports/forward_demo
+  allow_live_execution: true
+  require_demo_account: true
