@@ -22,11 +22,19 @@ logged into the intended demo/forward account and connected:
 .\tools\run_forward_observation.ps1 -ChunkCycles 50 -MaxChunks 100
 ```
 
-It runs preflight once, then launches bounded runtime chunks. Non-zero exits
+It runs a live, read-only preflight once, then launches bounded runtime chunks. The
+preflight verifies the connected account's demo trade mode and reports its login,
+server, trade mode, open-position count, and pending-order count. It has no order
+creation, modification, or closing path. Non-zero exits
 are logged and retried after a delay. Five consecutive failures stop the
 supervisor by default. Create `runtime/forward_demo/STOP` to request a clean
 stop before the next chunk. The supervisor log is separate from runtime logs:
 `logs/forward_demo/forward_observation_supervisor.log`.
+
+Child stdout and stderr are retained in
+`logs/forward_demo/forward_observation_child.log`, and mirrored into the
+supervisor log. `MaxChunks` counts successful chunks only; failed starts retry
+until the consecutive-failure limit is reached and then exit non-zero.
 
 The default profile is `deploy/v2/configs/forward_demo.yaml`. It has an
 isolated database, lock, runtime, log, and report namespace. It enables
@@ -56,3 +64,8 @@ The supervisor does not bypass it; it uses the separate demo-only profile.
 `forward_demo.yaml` requires a broker-reported demo account before allowing
 execution. No operator confirmation can bypass a missing, contest, or real
 trade mode while that guard is enabled.
+
+The supervisor selects the repository's MT5-enabled interpreter at
+`../pradita/Scripts/python.exe`. If that interpreter is absent, the operator
+must pass `-PythonPath` explicitly; it does not silently fall back to an
+unverified Python environment.

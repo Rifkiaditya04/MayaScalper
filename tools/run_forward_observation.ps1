@@ -7,7 +7,8 @@ param(
     [int]$RetryDelaySeconds = 30,
     [int]$ConsecutiveFailureLimit = 5,
     [string]$StopFile = "runtime/forward_demo/STOP",
-    [string]$LogPath = "logs/forward_demo/forward_observation_supervisor.log"
+    [string]$LogPath = "logs/forward_demo/forward_observation_supervisor.log",
+    [string]$ChildLogPath = "logs/forward_demo/forward_observation_child.log"
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,8 +16,11 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
 if ([string]::IsNullOrWhiteSpace($PythonPath)) {
-    $Candidate = Join-Path $RepoRoot ".venv\Scripts\python.exe"
-    $PythonPath = if (Test-Path $Candidate) { $Candidate } else { "python" }
+    $Candidate = Join-Path (Split-Path -Parent $RepoRoot) "pradita\Scripts\python.exe"
+    if (-not (Test-Path $Candidate)) {
+        throw "No repository MT5 interpreter found at $Candidate. Supply -PythonPath explicitly."
+    }
+    $PythonPath = $Candidate
 }
 if ($ChunkCycles -le 0 -or $MaxChunks -le 0 -or $ConsecutiveFailureLimit -le 0) {
     throw "ChunkCycles, MaxChunks, and ConsecutiveFailureLimit must be positive."
@@ -24,6 +28,8 @@ if ($ChunkCycles -le 0 -or $MaxChunks -le 0 -or $ConsecutiveFailureLimit -le 0) 
 
 $LogDirectory = Split-Path -Parent $LogPath
 if ($LogDirectory) { New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null }
+$ChildLogDirectory = Split-Path -Parent $ChildLogPath
+if ($ChildLogDirectory) { New-Item -ItemType Directory -Force -Path $ChildLogDirectory | Out-Null }
 
 function Write-SupervisorLog([string]$Message) {
     $Line = "$((Get-Date).ToUniversalTime().ToString('o')) $Message"
@@ -35,37 +41,56 @@ function Stop-Requested {
     return Test-Path -LiteralPath $StopFile
 }
 
+function Invoke-ObservedChild([string]$Phase, [string[]]$Arguments) {
+    $PreviousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $PythonPath @Arguments 2>&1 |
+            ForEach-Object { $_.ToString() } |
+            Tee-Object -FilePath $ChildLogPath -Append |
+            ForEach-Object { Write-SupervisorLog "OBSERVATION_CHILD phase=$Phase output=$_" }
+        return $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $PreviousErrorActionPreference
+    }
+}
+
 if (Stop-Requested) {
     Write-SupervisorLog "OBSERVATION_STOPPED stop_file_exists=$StopFile"
     exit 0
 }
 
 Write-SupervisorLog "OBSERVATION_PREFLIGHT_START config=$ConfigPath env=$EnvPath python=$PythonPath"
-& $PythonPath -m tsp_v2.run_v2 preflight --config $ConfigPath --env-file $EnvPath
-if ($LASTEXITCODE -ne 0) {
-    Write-SupervisorLog "OBSERVATION_PREFLIGHT_FAILED exit_code=$LASTEXITCODE"
-    exit $LASTEXITCODE
+$PreflightExitCode = Invoke-ObservedChild "preflight" @("-m", "tsp_v2.run_v2", "preflight", "--live", "--config", $ConfigPath, "--env-file", $EnvPath)
+if ($PreflightExitCode -ne 0) {
+    Write-SupervisorLog "OBSERVATION_PREFLIGHT_FAILED exit_code=$PreflightExitCode"
+    exit $PreflightExitCode
 }
 Write-SupervisorLog "OBSERVATION_PREFLIGHT_OK"
 
 $Failures = 0
-for ($Chunk = 1; $Chunk -le $MaxChunks; $Chunk++) {
+$SuccessfulChunks = 0
+$LastExitCode = 0
+while ($SuccessfulChunks -lt $MaxChunks) {
+    $Chunk = $SuccessfulChunks + 1
     if (Stop-Requested) {
         Write-SupervisorLog "OBSERVATION_STOPPED chunk=$Chunk stop_file=$StopFile"
         exit 0
     }
 
     Write-SupervisorLog "OBSERVATION_CHUNK_START chunk=$Chunk max_cycles=$ChunkCycles"
-    & $PythonPath -m tsp_v2.run_v2 start --config $ConfigPath --env-file $EnvPath --max-cycles $ChunkCycles
-    $ExitCode = $LASTEXITCODE
+    $ExitCode = Invoke-ObservedChild "chunk=$Chunk" @("-m", "tsp_v2.run_v2", "start", "--config", $ConfigPath, "--env-file", $EnvPath, "--max-cycles", $ChunkCycles)
     Write-SupervisorLog "OBSERVATION_CHUNK_STOP chunk=$Chunk exit_code=$ExitCode"
 
     if ($ExitCode -eq 0) {
         $Failures = 0
+        $SuccessfulChunks++
         continue
     }
 
     $Failures++
+    $LastExitCode = $ExitCode
     if ($Failures -ge $ConsecutiveFailureLimit) {
         Write-SupervisorLog "OBSERVATION_ABORTED consecutive_failures=$Failures limit=$ConsecutiveFailureLimit"
         exit $ExitCode
@@ -74,4 +99,8 @@ for ($Chunk = 1; $Chunk -le $MaxChunks; $Chunk++) {
     Start-Sleep -Seconds $RetryDelaySeconds
 }
 
-Write-SupervisorLog "OBSERVATION_COMPLETED max_chunks=$MaxChunks"
+if ($LastExitCode -ne 0) {
+    Write-SupervisorLog "OBSERVATION_FAILED exit_code=$LastExitCode"
+    exit $LastExitCode
+}
+Write-SupervisorLog "OBSERVATION_COMPLETED successful_chunks=$SuccessfulChunks"

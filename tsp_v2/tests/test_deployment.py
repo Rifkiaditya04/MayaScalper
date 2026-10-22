@@ -5,7 +5,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -85,6 +85,7 @@ class FakeProbe:
     broker_ready_flag: bool = True
     account_payload: dict[str, object] | None = None
     positions_payload: tuple[dict[str, object], ...] = ()
+    order_operation_calls: list[str] = field(default_factory=list)
 
     def broker_ready(self) -> bool:
         return self.broker_ready_flag
@@ -100,6 +101,15 @@ class FakeProbe:
 
     def live_positions(self) -> tuple[dict[str, object], ...]:
         return self.positions_payload
+
+    def place_order(self, *_args, **_kwargs) -> None:
+        self.order_operation_calls.append("place_order")
+
+    def modify_position_sltp(self, *_args, **_kwargs) -> None:
+        self.order_operation_calls.append("modify_position_sltp")
+
+    def close_position(self, *_args, **_kwargs) -> None:
+        self.order_operation_calls.append("close_position")
 
 
 @dataclass
@@ -393,13 +403,15 @@ class DeploymentTests(unittest.TestCase):
                 payload: dict[str, object] = {"equity": 100000.0}
                 if trade_mode is not None:
                     payload["trade_mode"] = trade_mode
+                probe = FakeProbe(broker_time_value=broker_time, account_payload=payload)
                 report = DeploymentRuntime(config).preflight(
                     dry_run=False,
-                    probe=FakeProbe(broker_time_value=broker_time, account_payload=payload),
+                    probe=probe,
                     current_time_utc=broker_time,
                 )
                 self.assertEqual(report.ok, expected_ok)
                 self.assertEqual(report.blocked_reason, "" if expected_ok else "account_not_demo")
+                self.assertEqual(probe.order_operation_calls, [])
 
     def test_preflight_can_explicitly_allow_non_demo_account(self) -> None:
         broker_time = datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc)
