@@ -60,6 +60,7 @@ deployment:
   log_root: logs
   report_root: reports
   allow_live_execution: false
+  require_demo_account: true
 news:
   provider_mode: STATIC_FILE
   source_path: {news_path}

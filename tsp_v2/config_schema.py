@@ -79,6 +79,7 @@ CONFIG_SCHEMA: dict[str, tuple[FieldSpec, ...]] = {
         FieldSpec("log_root", "str", True),
         FieldSpec("report_root", "str", True),
         FieldSpec("allow_live_execution", "bool", True),
+        FieldSpec("require_demo_account", "bool", True),
     ),
     "news": (
         FieldSpec("provider_mode", "enum", True, enum_type=NewsProviderMode),

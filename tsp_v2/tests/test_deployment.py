@@ -68,6 +68,7 @@ deployment:
   log_root: logs
   report_root: reports
   allow_live_execution: {allow_live_execution}
+  require_demo_account: {require_demo_account}
 news:
   provider_mode: STATIC_FILE
   source_path: {news_path}
@@ -95,7 +96,7 @@ class FakeProbe:
         return self.symbols
 
     def account_snapshot(self) -> dict[str, object]:
-        return self.account_payload or {"equity": 100000.0}
+        return self.account_payload or {"equity": 100000.0, "trade_mode": 0}
 
     def live_positions(self) -> tuple[dict[str, object], ...]:
         return self.positions_payload
@@ -191,6 +192,7 @@ class FakeLiveBridge:
             "daily_loss_pct": 0.0,
             "unrealized_r": 0.0,
             "realized_pnl_r": 0.0,
+            "trade_mode": 0,
         }
 
     def query_symbol_contract(self, symbol: str) -> dict[str, object]:
@@ -380,6 +382,40 @@ class DeploymentTests(unittest.TestCase):
             self.assertTrue(report.broker_ready)
             self.assertEqual(report.clock_health, ClockHealth.OK)
             self.assertFalse(runtime.lock.is_owned())
+
+    def test_preflight_demo_account_guard_fails_closed(self) -> None:
+        broker_time = datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc)
+        cases = ((0, True), (1, False), (2, False), (None, False))
+        for trade_mode, expected_ok in cases:
+            with self.subTest(trade_mode=trade_mode), tempfile.TemporaryDirectory() as tmp_dir:
+                root = Path(tmp_dir)
+                config = _load_config(root, allow_live_execution=True)
+                payload: dict[str, object] = {"equity": 100000.0}
+                if trade_mode is not None:
+                    payload["trade_mode"] = trade_mode
+                report = DeploymentRuntime(config).preflight(
+                    dry_run=False,
+                    probe=FakeProbe(broker_time_value=broker_time, account_payload=payload),
+                    current_time_utc=broker_time,
+                )
+                self.assertEqual(report.ok, expected_ok)
+                self.assertEqual(report.blocked_reason, "" if expected_ok else "account_not_demo")
+
+    def test_preflight_can_explicitly_allow_non_demo_account(self) -> None:
+        broker_time = datetime(2026, 5, 29, 9, 0, 0, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = _load_config(root, allow_live_execution=True, require_demo_account=False)
+            report = DeploymentRuntime(config).preflight(
+                dry_run=False,
+                probe=FakeProbe(
+                    broker_time_value=broker_time,
+                    account_payload={"equity": 100000.0, "trade_mode": 2},
+                ),
+                current_time_utc=broker_time,
+            )
+            self.assertTrue(report.ok)
+            self.assertEqual(report.blocked_reason, "")
 
     def test_lock_ownership_blocks_second_acquire(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1359,7 +1395,13 @@ class DeploymentTests(unittest.TestCase):
             self.assertFalse(runtime.lock.is_owned())
 
 
-def _load_config(root: Path, *, allow_live_execution: bool = False, allowlist: tuple[str, ...] = ("XAUUSD",)):
+def _load_config(
+    root: Path,
+    *,
+    allow_live_execution: bool = False,
+    require_demo_account: bool = True,
+    allowlist: tuple[str, ...] = ("XAUUSD",),
+):
     news_path = root / "news.json"
     news_path.write_text(
         "{\"generated_at_utc\":\"2026-05-29T09:00:00+00:00\",\"events\":[]}",
@@ -1372,6 +1414,7 @@ def _load_config(root: Path, *, allow_live_execution: bool = False, allowlist: t
         lock_path=str(lock_path).replace("\\", "/"),
         news_path=str(news_path).replace("\\", "/"),
         allow_live_execution="true" if allow_live_execution else "false",
+        require_demo_account="true" if require_demo_account else "false",
         allowlist="".join(f"    - {symbol}\n" for symbol in allowlist),
     )
     (root / "base.yaml").write_text(base_text, encoding="utf-8")

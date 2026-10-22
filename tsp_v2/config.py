@@ -117,6 +117,7 @@ class DeploymentConfig:
     log_root: Path
     report_root: Path
     allow_live_execution: bool
+    require_demo_account: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -374,6 +375,7 @@ def _materialize_config(
             log_root=_coerce_path(project_root, deployment["log_root"]),
             report_root=_coerce_path(project_root, deployment["report_root"]),
             allow_live_execution=deployment["allow_live_execution"],
+            require_demo_account=deployment["require_demo_account"],
         ),
         news=NewsConfig(
             provider_mode=news["provider_mode"],

@@ -294,9 +294,12 @@ class DeploymentRuntime:
                             except MT5BridgeError as exc:
                                 if exc.status.failure_class in {"SYMBOL_UNAVAILABLE", "CONTRACT_QUERY_FAILURE"}:
                                     warnings.append("clock_source_audit_unavailable")
-                                    probe.account_snapshot()
-                                    probe.live_positions()
-                                    broker_ready = True
+                                    account_snapshot = probe.account_snapshot()
+                                    if self._demo_account_required_and_missing(account_snapshot):
+                                        blocked_reason = "account_not_demo"
+                                    else:
+                                        probe.live_positions()
+                                        broker_ready = True
                                 else:
                                     raise
                             else:
@@ -320,9 +323,12 @@ class DeploymentRuntime:
                                 if is_execution_blocked(clock_state):
                                     blocked_reason = f"clock_{clock_state.health.value.lower()}"
                                 else:
-                                    probe.account_snapshot()
-                                    probe.live_positions()
-                                    broker_ready = True
+                                    account_snapshot = probe.account_snapshot()
+                                    if self._demo_account_required_and_missing(account_snapshot):
+                                        blocked_reason = "account_not_demo"
+                                    else:
+                                        probe.live_positions()
+                                        broker_ready = True
             elif dry_run:
                 warnings.append("live_checks_skipped")
                 broker_ready = True
@@ -946,6 +952,12 @@ class DeploymentRuntime:
             _assert_writable_path(path)
             validated.append(str(path))
         return tuple(validated)
+
+    def _demo_account_required_and_missing(self, account_snapshot: Mapping[str, Any]) -> bool:
+        if not self.config.deployment.require_demo_account:
+            return False
+        trade_mode = account_snapshot.get("trade_mode")
+        return isinstance(trade_mode, bool) or not isinstance(trade_mode, int) or trade_mode != 0
 
     def _primary_symbol(self) -> str:
         if not self.config.symbols.allowlist:

@@ -450,6 +450,8 @@ class MT5Bridge:
                     message="Unable to fetch account info from MT5",
                 )
             )
+        # MT5 account_info exposes trade_mode (0=demo, 1=contest, 2=real).
+        # Return the complete broker record so deployment can fail closed on it.
         return info
 
     def symbol_info(self, symbol: str) -> dict[str, Any]:

@@ -57,6 +57,7 @@ deployment:
   log_root: logs
   report_root: reports
   allow_live_execution: false
+  require_demo_account: true
 news:
   provider_mode: STATIC_FILE
   source_path: deploy/v2/news/calendar_snapshot.json
@@ -122,6 +123,7 @@ class ConfigFoundationTests(unittest.TestCase):
         self.assertEqual(config.signal.ttl_seconds, 480)
         self.assertEqual(config.execution.signal_ttl_seconds, 480)
         self.assertEqual(config.secrets.mt5_login, "123456")
+        self.assertTrue(config.deployment.require_demo_account)
         self.assertIsNotNone(config.fingerprint)
 
     def test_unknown_key_rejected_fail_loud(self) -> None:
@@ -303,6 +305,7 @@ class ConfigFoundationTests(unittest.TestCase):
                 "log_root": "logs",
                 "report_root": "reports",
                 "allow_live_execution": False,
+                "require_demo_account": True,
             },
             "news": {
                 "provider_mode": "STATIC_FILE",
@@ -322,6 +325,7 @@ class ConfigFoundationTests(unittest.TestCase):
             },
             "deployment": {
                 "allow_live_execution": False,
+                "require_demo_account": True,
                 "report_root": "reports",
                 "runtime_root": "runtime",
                 "log_root": "logs",

@@ -68,6 +68,7 @@ class FakeMT5:
             free_margin=95500.0,
             login=123456,
             server="Demo-Server",
+            trade_mode=0,
         )
         self._terminal_info = SimpleNamespace(connected=True, trade_allowed=True, trade_expert=True)
         self._tick_time = None if tick_time_missing else (tick_time or datetime(2026, 5, 29, 10, 0, tzinfo=timezone.utc))
@@ -286,6 +287,7 @@ class MT5BridgeTests(unittest.TestCase):
 
         account = bridge.query_account()
         self.assertEqual(account["equity"], 100500.0)
+        self.assertEqual(account["trade_mode"], 0)
 
         contract = bridge.query_symbol_contract("xauusd")
         self.assertEqual(contract["symbol"], "XAUUSD")

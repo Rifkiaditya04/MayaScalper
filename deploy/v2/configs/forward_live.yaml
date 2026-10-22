@@ -17,3 +17,4 @@ deployment:
   log_root: logs/forward_live
   report_root: reports/forward_live
   allow_live_execution: false
+  require_demo_account: true
