@@ -154,12 +154,14 @@ def _print_live_account_summary(probe: Any, blocked_reason: str) -> None:
         return
 
     trade_mode = account.get("trade_mode")
+    positions_without_stop = sum(1 for position in positions if _position_has_no_stop(position))
     print(
         "LIVE ACCOUNT | "
         f"login={account.get('login', 'unknown')} | "
         f"server={account.get('server', 'unknown')} | "
         f"trade_mode={trade_mode!r} ({_trade_mode_label(trade_mode)}) | "
-        f"open_positions={len(positions)} | pending_orders={len(pending_orders)} | "
+        f"open_positions={len(positions)} | positions_without_sl={positions_without_stop} | "
+        f"pending_orders={len(pending_orders)} | "
         f"blocked_reason={blocked_reason or 'none'}"
     )
 
@@ -169,6 +171,13 @@ def _trade_mode_label(trade_mode: Any) -> str:
     if isinstance(trade_mode, bool) or not isinstance(trade_mode, int):
         return "unknown"
     return labels.get(trade_mode, "unknown")
+
+
+def _position_has_no_stop(position: Mapping[str, Any]) -> bool:
+    try:
+        return float(position.get("sl", 0.0)) <= 0.0
+    except (TypeError, ValueError):
+        return True
 
 
 def _print_startup(report) -> None:

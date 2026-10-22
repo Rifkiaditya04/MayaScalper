@@ -40,7 +40,7 @@ class _ReadOnlyProbe:
         return {"login": 123456, "server": "Demo-Server", "trade_mode": self.trade_mode}
 
     def live_positions(self) -> tuple[dict[str, object], ...]:
-        return ({"ticket": 7},)
+        return ({"ticket": 7, "sl": 0.0},)
 
     def close(self) -> None:
         self.closed = True
@@ -87,6 +87,7 @@ class RunV2LivePreflightTests(unittest.TestCase):
         output = "\n".join(str(call.args[0]) for call in print_mock.call_args_list)
         self.assertIn("trade_mode=0 (demo)", output)
         self.assertIn("open_positions=1", output)
+        self.assertIn("positions_without_sl=1", output)
         self.assertIn("pending_orders=1", output)
 
     def test_live_preflight_reports_guard_rejections_without_order_operations(self) -> None:

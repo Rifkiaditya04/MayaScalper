@@ -45,11 +45,13 @@ function Invoke-ObservedChild([string]$Phase, [string[]]$Arguments) {
     $PreviousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        & $PythonPath @Arguments 2>&1 |
+        $ChildOutput = & $PythonPath @Arguments 2>&1
+        $ChildExitCode = $global:LASTEXITCODE
+        $ChildOutput |
             ForEach-Object { $_.ToString() } |
             Tee-Object -FilePath $ChildLogPath -Append |
             ForEach-Object { Write-SupervisorLog "OBSERVATION_CHILD phase=$Phase output=$_" }
-        return $LASTEXITCODE
+        return $ChildExitCode
     }
     finally {
         $ErrorActionPreference = $PreviousErrorActionPreference
@@ -71,7 +73,7 @@ Write-SupervisorLog "OBSERVATION_PREFLIGHT_OK"
 
 $Failures = 0
 $SuccessfulChunks = 0
-$LastExitCode = 0
+$LastFailureCode = 0
 while ($SuccessfulChunks -lt $MaxChunks) {
     $Chunk = $SuccessfulChunks + 1
     if (Stop-Requested) {
@@ -85,12 +87,13 @@ while ($SuccessfulChunks -lt $MaxChunks) {
 
     if ($ExitCode -eq 0) {
         $Failures = 0
+        $LastFailureCode = 0
         $SuccessfulChunks++
         continue
     }
 
     $Failures++
-    $LastExitCode = $ExitCode
+    $LastFailureCode = $ExitCode
     if ($Failures -ge $ConsecutiveFailureLimit) {
         Write-SupervisorLog "OBSERVATION_ABORTED consecutive_failures=$Failures limit=$ConsecutiveFailureLimit"
         exit $ExitCode
@@ -99,8 +102,8 @@ while ($SuccessfulChunks -lt $MaxChunks) {
     Start-Sleep -Seconds $RetryDelaySeconds
 }
 
-if ($LastExitCode -ne 0) {
-    Write-SupervisorLog "OBSERVATION_FAILED exit_code=$LastExitCode"
-    exit $LastExitCode
+if ($LastFailureCode -ne 0) {
+    Write-SupervisorLog "OBSERVATION_FAILED exit_code=$LastFailureCode"
+    exit $LastFailureCode
 }
 Write-SupervisorLog "OBSERVATION_COMPLETED successful_chunks=$SuccessfulChunks"

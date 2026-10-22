@@ -36,6 +36,19 @@ Child stdout and stderr are retained in
 supervisor log. `MaxChunks` counts successful chunks only; failed starts retry
 until the consecutive-failure limit is reached and then exit non-zero.
 
+The supervisor captures the child process exit code immediately after the
+native child returns, before formatting its captured output through a
+PowerShell logging pipeline, and keeps failure state in a separate variable. Its local,
+MT5-free regression harness is runnable with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\tests\test_forward_observation_supervisor.ps1
+```
+
+The harness verifies an always-failing child, an always-successful child, and
+a child that fails once before succeeding. It uses
+`tools/tests/forward_observation_stub.cmd` and never starts MT5 or the bot.
+
 The default profile is `deploy/v2/configs/forward_demo.yaml`. It has an
 isolated database, lock, runtime, log, and report namespace. It enables
 execution only after preflight confirms the MT5 account reports demo mode.
