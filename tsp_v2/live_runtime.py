@@ -300,6 +300,16 @@ class LiveRuntimeRunner:
         if not self._closed_m5_gate_allows_process(current_m5_close_utc):
             return None
 
+        aggregate_spread_health = _aggregate_health(snapshot.spread_health for snapshot in snapshots.values())
+        aggregate_latency_health = _aggregate_health(snapshot.latency_health for snapshot in snapshots.values())
+        self._emit_snapshot_health_telemetry(
+            cycle_time_utc=broker_time,
+            snapshots=snapshots,
+            execution_health=market_status.health,
+            aggregate_spread_health=aggregate_spread_health,
+            aggregate_latency_health=aggregate_latency_health,
+        )
+
         regimes: dict[str, Any] = {}
         signal_evaluations: list[SignalEvaluation] = []
         for symbol, snapshot in snapshots.items():
@@ -321,8 +331,10 @@ class LiveRuntimeRunner:
                 active_positions=self._broker_positions_as_snapshots(broker_positions),
                 current_time_utc=broker_time,
                 execution_health=market_status.health,
-                spread_health=_aggregate_health(snapshot.spread_health for snapshot in snapshots.values()),
-                latency_health=_aggregate_health(snapshot.latency_health for snapshot in snapshots.values()),
+                spread_health=aggregate_spread_health,
+                latency_health=aggregate_latency_health,
+                spread_health_by_symbol={symbol.upper(): snapshot.spread_health for symbol, snapshot in snapshots.items()},
+                latency_health_by_symbol={symbol.upper(): snapshot.latency_health for symbol, snapshot in snapshots.items()},
                 symbol_cooldown_until_utc={},
             ),
         )
@@ -718,6 +730,34 @@ class LiveRuntimeRunner:
                 "first_rejection_reason": trace.first_rejection_reason,
             }
             self._emit_telemetry("runtime.portfolio_selection", payload)
+
+    def _emit_snapshot_health_telemetry(
+        self,
+        *,
+        cycle_time_utc: datetime,
+        snapshots: Mapping[str, MarketSnapshot],
+        execution_health: HealthState,
+        aggregate_spread_health: HealthState,
+        aggregate_latency_health: HealthState,
+    ) -> None:
+        for symbol, snapshot in snapshots.items():
+            self._emit_telemetry(
+                "runtime.snapshot_health",
+                {
+                    "cycle_time_utc": cycle_time_utc.isoformat(),
+                    "symbol": symbol,
+                    "feed_health": snapshot.feed_health.value,
+                    "latency_health": snapshot.latency_health.value,
+                    "spread_health": snapshot.spread_health.value,
+                    "spread_points": getattr(snapshot, "spread_points", None),
+                    "spread_ratio": getattr(snapshot, "spread_ratio", None),
+                    "spread_baseline_source": getattr(snapshot, "payload_diagnostics", {}).get("spread_baseline_source"),
+                    "payload_health": getattr(snapshot, "payload_health", HealthState.GREEN).value,
+                    "portfolio_execution_health": execution_health.value,
+                    "portfolio_spread_health": aggregate_spread_health.value,
+                    "portfolio_latency_health": aggregate_latency_health.value,
+                },
+            )
 
     def _emit_recovered(self, when: datetime, *, bootstrap_ready: bool) -> None:
         self._emit_telemetry(

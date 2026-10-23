@@ -157,6 +157,41 @@ class PortfolioTests(unittest.TestCase):
                     self.assertEqual(trace.score, next(signal.score for signal in signals if signal.setup_id == trace.setup_id))
                     self.assertEqual(trace.threshold, next(signal.threshold for signal in signals if signal.setup_id == trace.setup_id))
 
+    def test_symbol_specific_health_does_not_block_healthy_candidate(self) -> None:
+        selected, traces = trace_rank_opportunities(
+            [_signal("GBPUSD", 0.91)],
+            context=_context(
+                spread_health=HealthState.RED,
+                latency_health=HealthState.RED,
+                spread_health_by_symbol={"GBPUSD": HealthState.GREEN, "EURUSD": HealthState.RED},
+                latency_health_by_symbol={"GBPUSD": HealthState.GREEN, "EURUSD": HealthState.RED},
+            ),
+        )
+
+        self.assertEqual([signal.symbol for signal in selected], ["GBPUSD"])
+        self.assertTrue(traces[0].selected)
+
+    def test_symbol_specific_latency_health_blocks_its_own_candidate(self) -> None:
+        selected, traces = trace_rank_opportunities(
+            [_signal("GBPUSD", 0.91)],
+            context=_context(
+                latency_health=HealthState.GREEN,
+                latency_health_by_symbol={"GBPUSD": HealthState.RED},
+            ),
+        )
+
+        self.assertEqual(selected, [])
+        self.assertEqual(traces[0].first_rejection_reason, "LATENCY_HEALTH")
+
+    def test_symbol_health_mapping_falls_back_to_global_health(self) -> None:
+        selected, traces = trace_rank_opportunities(
+            [_signal("GBPUSD", 0.91)],
+            context=_context(spread_health=HealthState.YELLOW),
+        )
+
+        self.assertEqual(selected, [])
+        self.assertEqual(traces[0].first_rejection_reason, "SPREAD_HEALTH")
+
 
 def _context(
     *,
@@ -166,6 +201,8 @@ def _context(
     execution_health: HealthState = HealthState.GREEN,
     spread_health: HealthState = HealthState.GREEN,
     latency_health: HealthState = HealthState.GREEN,
+    spread_health_by_symbol: dict[str, HealthState] | None = None,
+    latency_health_by_symbol: dict[str, HealthState] | None = None,
     replacement_superiority: float = 0.12,
     max_positions: int = 2,
 ) -> PortfolioContext:
@@ -175,6 +212,8 @@ def _context(
         execution_health=execution_health,
         spread_health=spread_health,
         latency_health=latency_health,
+        spread_health_by_symbol=spread_health_by_symbol or {},
+        latency_health_by_symbol=latency_health_by_symbol or {},
         replacement_superiority=replacement_superiority,
         max_positions=max_positions,
         symbol_cooldown_until_utc=symbol_cooldown_until_utc or {},

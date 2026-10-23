@@ -85,9 +85,9 @@ def trace_rank_opportunities(
             rejection_reason = "DUPLICATE_SYMBOL"
         elif ctx.execution_health is not HealthState.GREEN:
             rejection_reason = "EXECUTION_HEALTH"
-        elif ctx.spread_health is not HealthState.GREEN:
+        elif ctx.spread_health_by_symbol.get(signal.symbol.upper(), ctx.spread_health) is not HealthState.GREEN:
             rejection_reason = "SPREAD_HEALTH"
-        elif ctx.latency_health is not HealthState.GREEN:
+        elif ctx.latency_health_by_symbol.get(signal.symbol.upper(), ctx.latency_health) is not HealthState.GREEN:
             rejection_reason = "LATENCY_HEALTH"
         elif not _correlation_budget_allows(signal, active_group_risk):
             rejection_reason = "CORRELATION_BUDGET"

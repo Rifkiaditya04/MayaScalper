@@ -1208,6 +1208,14 @@ class DeploymentTests(unittest.TestCase):
                     LIMIT 1
                     """
                 ).fetchall()
+                snapshot_health_rows = telemetry_db.execute(
+                    """
+                    SELECT payload_json
+                    FROM telemetry_index
+                    WHERE topic = 'runtime.snapshot_health'
+                    ORDER BY rowid ASC
+                    """
+                ).fetchall()
                 telemetry_db.close()
                 self.assertEqual(len(rows), 2)
                 first_payload = json.loads(rows[0]["payload_json"])
@@ -1225,6 +1233,11 @@ class DeploymentTests(unittest.TestCase):
                 runtime_payload = json.loads(runtime_rows[0]["payload_json"])
                 self.assertEqual(runtime_payload["selected_signal_count"], 1)
                 self.assertEqual(runtime_payload["execution_count"], 0)
+                self.assertEqual(len(snapshot_health_rows), 2)
+                snapshot_health_payload = json.loads(snapshot_health_rows[0]["payload_json"])
+                self.assertEqual(snapshot_health_payload["portfolio_execution_health"], "GREEN")
+                self.assertEqual(snapshot_health_payload["portfolio_spread_health"], "GREEN")
+                self.assertEqual(snapshot_health_payload["portfolio_latency_health"], "GREEN")
                 execution_adapter.execute.assert_not_called()
             finally:
                 store.close()

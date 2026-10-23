@@ -183,6 +183,8 @@ class PortfolioContext:
     execution_health: HealthState = HealthState.GREEN
     spread_health: HealthState = HealthState.GREEN
     latency_health: HealthState = HealthState.GREEN
+    spread_health_by_symbol: dict[str, HealthState] = field(default_factory=dict)
+    latency_health_by_symbol: dict[str, HealthState] = field(default_factory=dict)
     replacement_superiority: float = 0.12
     max_positions: int = 2
     symbol_cooldown_until_utc: dict[str, datetime] = field(default_factory=dict)
