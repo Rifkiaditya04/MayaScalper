@@ -22,6 +22,8 @@ M1_HISTORY_LOOKBACK_MINUTES_INITIAL = 42
 M1_HISTORY_LOOKBACK_MINUTES_STEP = 24
 M1_HISTORY_LOOKBACK_MINUTES_MAX = 120
 M1_HISTORY_MIN_CLOSED_BARS = 34
+NON_M1_HISTORY_LOOKBACK_MINUTES_STEP = 24 * 60
+NON_M1_HISTORY_LOOKBACK_MINUTES_MAX = 7 * 24 * 60
 
 SUCCESS_RET_CODES = {
     "DONE",
@@ -1000,21 +1002,37 @@ class MT5Bridge:
             lookback_bars = max(count + 2, 40)
             window_minutes = timeframe_minutes * lookback_bars
             requested_end_utc = cycle_utc
+            attempts = 0
+            last_raw: Any = None
+            last_records: list[dict[str, Any]] = []
+            raw_count = 0
             requested_start_utc = cycle_utc - timedelta(minutes=window_minutes)
-            records, last_raw = fetch_window(
-                requested_start_utc=requested_start_utc,
-                requested_end_utc=requested_end_utc,
-            )
-            raw_count = len(records)
-            if raw_count > count:
-                records = records[-count:]
+            while True:
+                attempts += 1
+                requested_start_utc = cycle_utc - timedelta(minutes=window_minutes)
+                last_records, last_raw = fetch_window(
+                    requested_start_utc=requested_start_utc,
+                    requested_end_utc=requested_end_utc,
+                )
+                raw_count = len(last_records)
+                if raw_count >= count or window_minutes >= NON_M1_HISTORY_LOOKBACK_MINUTES_MAX:
+                    break
+                next_window_minutes = min(
+                    NON_M1_HISTORY_LOOKBACK_MINUTES_MAX,
+                    window_minutes + NON_M1_HISTORY_LOOKBACK_MINUTES_STEP,
+                )
+                if next_window_minutes == window_minutes:
+                    break
+                window_minutes = next_window_minutes
+
+            records = last_records[-count:]
             metadata = window_metadata(
                 requested_start_utc=requested_start_utc,
                 requested_end_utc=requested_end_utc,
                 returned_count=raw_count,
                 effective_count=len(records),
                 fetch_window_minutes=window_minutes,
-                adaptive_attempts=1,
+                adaptive_attempts=attempts,
                 adaptive_closed_count=raw_count,
             )
             return records, last_raw, metadata

@@ -648,6 +648,95 @@ class MT5BridgeTests(unittest.TestCase):
         self.assertEqual(rates[-1]["requested_count"], 90)
         self.assertEqual(rates[-1]["fetch_window_minutes"], 460)
 
+    def test_get_rates_non_m1_expands_weekend_window_until_requested_count_is_available(self) -> None:
+        cycle_time = datetime(2026, 1, 5, 0, 30, tzinfo=timezone.utc)
+        friday_close = datetime(2026, 1, 2, 21, 0, tzinfo=timezone.utc)
+        sunday_open = datetime(2026, 1, 4, 21, 0, tzinfo=timezone.utc)
+
+        class WeekendGapFakeMT5(FakeMT5):
+            def copy_rates_range(self, symbol, timeframe, date_from, date_to):
+                self.range_calls.append(
+                    {
+                        "symbol": symbol,
+                        "timeframe": timeframe,
+                        "date_from": date_from,
+                        "date_to": date_to,
+                    }
+                )
+                step_minutes = {"M5": 5, "M15": 15, "H1": 60}[str(timeframe).upper()]
+                current = date_from
+                records: list[SimpleNamespace] = []
+                while current <= date_to:
+                    if current <= friday_close or current >= sunday_open:
+                        index = len(records)
+                        records.append(
+                            SimpleNamespace(
+                                time=int(current.timestamp()),
+                                open=100.0 + index,
+                                high=100.5 + index,
+                                low=99.5 + index,
+                                close=100.2 + index,
+                                tick_volume=100 + index,
+                                real_volume=50 + index,
+                            )
+                        )
+                    current += timedelta(minutes=step_minutes)
+                return records
+
+        cases = (("H1", 34), ("M15", 34), ("M5", 90))
+        for timeframe, count in cases:
+            with self.subTest(timeframe=timeframe):
+                fake = WeekendGapFakeMT5(tick_time=cycle_time, rates_time=cycle_time)
+                bridge = MT5Bridge(mt5_module=fake)
+                bridge.connect()
+
+                rates = bridge.get_rates("GBPUSD", timeframe, count, cycle_time_utc=cycle_time)
+
+                self.assertEqual(len(rates), count)
+                self.assertGreater(len(fake.range_calls), 1)
+                self.assertGreater(rates[-1]["adaptive_attempts"], 1)
+                initial_window_minutes = {"H1": 2520, "M15": 600, "M5": 460}[timeframe]
+                self.assertGreater(rates[-1]["adaptive_window_minutes"], initial_window_minutes)
+                self.assertEqual(fake.pos_calls, [])
+                self.assertTrue(all(call["date_from"] >= cycle_time - timedelta(days=7) for call in fake.range_calls))
+
+    def test_get_rates_non_m1_stops_at_week_bound_and_returns_available_records(self) -> None:
+        cycle_time = datetime(2026, 1, 5, 0, 30, tzinfo=timezone.utc)
+
+        class AlwaysSparseNonM1FakeMT5(FakeMT5):
+            def copy_rates_range(self, symbol, timeframe, date_from, date_to):
+                self.range_calls.append(
+                    {
+                        "symbol": symbol,
+                        "timeframe": timeframe,
+                        "date_from": date_from,
+                        "date_to": date_to,
+                    }
+                )
+                return [
+                    SimpleNamespace(
+                        time=int((date_to - timedelta(hours=index)).timestamp()),
+                        open=100.0 + index,
+                        high=100.5 + index,
+                        low=99.5 + index,
+                        close=100.2 + index,
+                        tick_volume=100 + index,
+                        real_volume=50 + index,
+                    )
+                    for index in range(3)
+                ]
+
+        fake = AlwaysSparseNonM1FakeMT5(tick_time=cycle_time, rates_time=cycle_time)
+        bridge = MT5Bridge(mt5_module=fake)
+        bridge.connect()
+
+        rates = bridge.get_rates("GBPUSD", "H1", 40, cycle_time_utc=cycle_time)
+
+        self.assertEqual(len(rates), 3)
+        self.assertEqual(rates[-1]["adaptive_window_minutes"], 7 * 24 * 60)
+        self.assertTrue(all((call["date_to"] - call["date_from"]).total_seconds() <= 7 * 24 * 60 * 60 for call in fake.range_calls))
+        self.assertEqual(fake.pos_calls, [])
+
     def test_get_rates_legacy_path_retains_copy_rates_from_pos_without_cycle_time(self) -> None:
         fake = FakeMT5()
         bridge = MT5Bridge(
