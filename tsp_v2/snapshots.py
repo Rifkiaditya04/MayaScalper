@@ -343,12 +343,17 @@ def build_market_snapshot(
     )
 
     spread_points = (tick["ask"] - tick["bid"]) / contract.point
+    spread_points_baseline, spread_baseline_source = _m5_spread_baseline(
+        bars_m5,
+        fallback_spread_points=spread_points,
+    )
     indicator_bundle = _build_indicator_bundle(
         bars_m1=bars_m1,
         bars_m5=bars_m5,
         bars_m15=bars_m15,
         bars_h1=bars_h1,
         spread_points=spread_points,
+        spread_points_baseline=spread_points_baseline,
     )
     spread_ratio = (
         spread_points / indicator_bundle["spread_points_baseline"]
@@ -362,6 +367,7 @@ def build_market_snapshot(
         "requested_counts": requested_counts,
         "returned_counts": raw_counts,
         "closed_counts": closed_counts,
+        "spread_baseline_source": spread_baseline_source,
     }
     emit_diagnostics(
         {
@@ -528,18 +534,20 @@ def _normalize_rates(rates: Sequence[Any], *, timeframe: str) -> list[dict[str, 
             raise ConfigValidationError(f"Inconsistent OHLC high in {timeframe} rates")
         if low > min(open_price, close, high):
             raise ConfigValidationError(f"Inconsistent OHLC low in {timeframe} rates")
-        normalized.append(
-            {
-                "timestamp": timestamp,
-                "close_time_utc": timestamp + timedelta(minutes=TIMEFRAME_MINUTES[timeframe]),
-                "open": open_price,
-                "high": high,
-                "low": low,
-                "close": close,
-                "tick_volume": volume,
-                "timeframe": timeframe,
-            }
-        )
+        bar = {
+            "timestamp": timestamp,
+            "close_time_utc": timestamp + timedelta(minutes=TIMEFRAME_MINUTES[timeframe]),
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "close": close,
+            "tick_volume": volume,
+            "timeframe": timeframe,
+        }
+        raw_spread = _optional_record_value(record, "spread")
+        if raw_spread is not None:
+            bar["spread"] = float(raw_spread)
+        normalized.append(bar)
     return normalized
 
 
@@ -624,6 +632,7 @@ def _build_indicator_bundle(
     bars_m15: Sequence[dict[str, Any]],
     bars_h1: Sequence[dict[str, Any]],
     spread_points: float,
+    spread_points_baseline: float,
 ) -> dict[str, Any]:
     m1_atr_values = _rolling_atr_values(bars_m1)
     m5_atr_values = _rolling_atr_values(bars_m5)
@@ -644,12 +653,34 @@ def _build_indicator_bundle(
         "adx_h1": _adx(bars_h1),
         "h1_slope": _slope_from_closes(bars_h1),
         "m15_slope": _slope_from_closes(bars_m15),
-        "spread_points_baseline": max(spread_points, 1.0),
+        "spread_points_baseline": spread_points_baseline,
         "tick_volume_m1": float(bars_m1[-1]["tick_volume"]),
         "tick_volume_m1_base": float(
             median(bar["tick_volume"] for bar in bars_m1[-ATR_BASELINE_PERIOD:])
         ),
     }
+
+
+def _m5_spread_baseline(
+    bars_m5: Sequence[dict[str, Any]],
+    *,
+    fallback_spread_points: float,
+) -> tuple[float, str]:
+    spreads: list[float] = []
+    for bar in bars_m5[-ATR_BASELINE_PERIOD:]:
+        raw_spread = bar.get("spread")
+        if raw_spread is None:
+            return max(fallback_spread_points, 1.0), "fallback_current"
+        try:
+            spreads.append(float(raw_spread))
+        except (TypeError, ValueError):
+            return max(fallback_spread_points, 1.0), "fallback_current"
+    if not spreads:
+        return max(fallback_spread_points, 1.0), "fallback_current"
+    baseline = float(median(spreads))
+    if baseline <= 0.0:
+        return max(fallback_spread_points, 1.0), "fallback_current"
+    return baseline, "m5_median"
 
 
 def _rolling_atr_values(
@@ -791,3 +822,9 @@ def _record_value(record: Any, key: str, *, alt_keys: Sequence[str] = (), defaul
     if default is not None:
         return default
     raise ConfigValidationError(f"Missing attribute '{key}' in market-data record")
+
+
+def _optional_record_value(record: Any, key: str) -> Any | None:
+    if isinstance(record, dict):
+        return record.get(key)
+    return getattr(record, key, None)

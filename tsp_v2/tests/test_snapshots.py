@@ -221,6 +221,30 @@ class M1FutureBarProvider(FakeMarketProvider):
         return bars
 
 
+class SpreadBaselineProvider(FakeMarketProvider):
+    def __init__(self, *, current_spread_points: float, historical_spread_points: float, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self._current_spread_points = current_spread_points
+        self._historical_spread_points = historical_spread_points
+
+    def get_latest_tick(self, symbol: str) -> dict[str, object]:
+        tick = super().get_latest_tick(symbol)
+        tick["ask"] = float(tick["bid"]) + (self._current_spread_points * 0.1)
+        return tick
+
+    def get_rates(
+        self,
+        symbol: str,
+        timeframe: str,
+        count: int,
+        cycle_time_utc: datetime | None = None,
+    ) -> list[dict[str, object]]:
+        bars = super().get_rates(symbol, timeframe, count, cycle_time_utc=cycle_time_utc)
+        for bar in bars:
+            bar["spread"] = self._historical_spread_points
+        return bars
+
+
 class SnapshotTests(unittest.TestCase):
     def setUp(self) -> None:
         self._saved_env = os.environ.copy()
@@ -257,6 +281,64 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(diagnostics[-1]["requested_bars"]["M5"], 90)
         self.assertEqual(diagnostics[-1]["returned_bars"]["M5"], 90)
         self.assertEqual(diagnostics[-1]["closed_bar_count"]["M1"], 40)
+
+    def test_snapshot_uses_m5_median_spread_baseline_and_marks_two_x_spread_red(self) -> None:
+        cycle_time = datetime(2026, 5, 26, 13, 10, 0, tzinfo=timezone.utc)
+        provider = SpreadBaselineProvider(
+            tick_time=cycle_time,
+            m1_last_time=cycle_time - timedelta(minutes=1),
+            current_spread_points=10.0,
+            historical_spread_points=5.0,
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            snapshot = build_market_snapshot(
+                provider,
+                config=self._load_config(Path(tmp_dir)),
+                symbol="XAUUSD",
+                cycle_time_utc=cycle_time,
+            )
+
+        self.assertEqual(snapshot.payload_diagnostics["spread_baseline_source"], "m5_median")
+        self.assertEqual(snapshot.indicator_bundle["spread_points_baseline"], 5.0)
+        self.assertEqual(snapshot.spread_ratio, 2.0)
+        self.assertEqual(snapshot.spread_health, HealthState.RED)
+
+    def test_snapshot_marks_normal_spread_green_against_m5_median_baseline(self) -> None:
+        cycle_time = datetime(2026, 5, 26, 13, 10, 0, tzinfo=timezone.utc)
+        provider = SpreadBaselineProvider(
+            tick_time=cycle_time,
+            m1_last_time=cycle_time - timedelta(minutes=1),
+            current_spread_points=5.0,
+            historical_spread_points=5.0,
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            snapshot = build_market_snapshot(
+                provider,
+                config=self._load_config(Path(tmp_dir)),
+                symbol="XAUUSD",
+                cycle_time_utc=cycle_time,
+            )
+
+        self.assertEqual(snapshot.payload_diagnostics["spread_baseline_source"], "m5_median")
+        self.assertEqual(snapshot.spread_ratio, 1.0)
+        self.assertEqual(snapshot.spread_health, HealthState.GREEN)
+
+    def test_snapshot_marks_missing_rate_spread_as_fallback_current(self) -> None:
+        cycle_time = datetime(2026, 5, 26, 13, 10, 0, tzinfo=timezone.utc)
+        provider = FakeMarketProvider(
+            tick_time=cycle_time,
+            m1_last_time=cycle_time - timedelta(minutes=1),
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            snapshot = build_market_snapshot(
+                provider,
+                config=self._load_config(Path(tmp_dir)),
+                symbol="XAUUSD",
+                cycle_time_utc=cycle_time,
+            )
+
+        self.assertEqual(snapshot.payload_diagnostics["spread_baseline_source"], "fallback_current")
+        self.assertEqual(snapshot.spread_ratio, 1.0)
 
     def test_snapshot_emits_closed_bar_diagnostics_before_rejecting(self) -> None:
         cycle_time = datetime(2026, 5, 26, 13, 10, 0, tzinfo=timezone.utc)
