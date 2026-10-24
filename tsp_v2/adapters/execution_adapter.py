@@ -73,7 +73,12 @@ class MT5ExecutionAdapter:
                 response={},
                 diagnostics=exc.status.diagnostics,
             )
-        disposition = classify_broker_response(bridge_result.response)
+        response_for_disposition = dict(bridge_result.response)
+        if bridge_result.failure_class:
+            # MT5 raw retcodes are numeric, while execution state mapping uses the
+            # bridge's normalized code such as DONE or DONE_PARTIAL.
+            response_for_disposition["retcode"] = bridge_result.failure_class
+        disposition = classify_broker_response(response_for_disposition)
         result = self._build_execution_result(intent, bridge_result, disposition, request=request)
         self._update_registry(intent, bridge_result, disposition, at_utc=canonical_time)
         self.last_result = result

@@ -100,7 +100,7 @@ def _protective_stop_loss(*, bid: float, initial_stop: float, contract: Mapping[
     stop_level_points = float(contract.get("trade_stops_level", 0.0) or 0.0)
     if point <= 0.0:
         raise DemoOrderPathSafetyError("Contract point must be positive")
-    candidate = _rounded_price(bid - max(3.0 * stop_level_points * point, point), contract)
+    candidate = _rounded_price(bid - max(3.0 * stop_level_points * point, 100.0 * point), contract)
     if candidate <= initial_stop or candidate >= bid:
         raise DemoOrderPathSafetyError("Cannot derive a more protective valid stop loss from the current tick")
     return candidate
@@ -113,7 +113,7 @@ def _event(label: str, *, started: datetime, result: Any, **fields: Any) -> None
     payload = {
         "event": label,
         "elapsed_ms": round(elapsed_ms, 1),
-        "ok": bool(getattr(result, "ok", False)),
+        "ok": bool(getattr(result, "ok", getattr(result, "accepted", False))),
         "ticket": getattr(result, "ticket", None),
         "retcode": response.get("retcode") or getattr(result, "failure_class", None),
         "comment": response.get("comment") or getattr(result, "message", None),
@@ -130,15 +130,124 @@ def _find_position(bridge: Any, ticket: int) -> dict[str, Any]:
     return dict(positions[0])
 
 
+def _cleanup_test_symbol_positions(bridge: Any, *, symbol: str) -> None:
+    """Best-effort cleanup that never replaces the failure that triggered it."""
+    try:
+        positions = tuple(bridge.query_positions(symbol=symbol))
+    except Exception as exc:
+        print(f"ORDER_PATH_CRITICAL | cleanup_query_failed={type(exc).__name__}: {exc}")
+        return
+    for position in positions:
+        ticket = position.get("ticket")
+        try:
+            if ticket is None:
+                raise RuntimeError("Broker position did not contain a ticket")
+            started = datetime.now(tz=timezone.utc)
+            result = bridge.close_position(int(ticket), comment="DEMO_ORDER_PATH_CHECK_FINALLY")
+            _event("finally_close_position", started=started, result=result)
+        except Exception as exc:
+            print(f"ORDER_PATH_CRITICAL | finally_close_failed={type(exc).__name__}: {exc}")
+
+
+def _run_connected_order_path_check(bridge: Any, *, symbol: str) -> int:
+    """Exercise the broker path after an already-connected bridge passed safety checks."""
+    from tsp_v2.adapters.execution_adapter import MT5ExecutionAdapter
+    from tsp_v2.enums import Direction, SignalFamily
+    from tsp_v2.models import ExecutionIntent
+
+    account, contract, tick = validate_demo_order_path_preconditions(bridge, symbol=symbol)
+    bid = float(tick["bid"])
+    ask = float(tick["ask"])
+    volume = float(contract.get("volume_min", 0.0) or 0.0)
+    if volume <= 0.0:
+        raise DemoOrderPathSafetyError("Contract volume_min must be positive")
+    initial_stop = _initial_stop_loss(ask=ask, contract=contract)
+    now_utc = datetime.now(tz=timezone.utc)
+    intent = ExecutionIntent(
+        setup_id=f"demo-order-path-{uuid4().hex[:12]}",
+        signal_family=SignalFamily.MICRO_IMPULSE,
+        symbol=symbol.strip().upper(),
+        direction=Direction.LONG,
+        decision_price=(bid + ask) / 2.0,
+        sized_volume=volume,
+        stop_loss_price=initial_stop,
+        submission_uuid=uuid4().hex,
+        cycle_time_utc=now_utc,
+    )
+    print(
+        "ORDER_PATH_PRECHECK | "
+        f"login={account.get('login')} | symbol={intent.symbol} | volume={volume} | "
+        f"stop_level_points={contract.get('trade_stops_level')} | spread={ask - bid} | "
+        f"filling_mode={contract.get('filling_mode')} | trade_exemode={contract.get('trade_exemode')} | "
+        f"initial_sl={initial_stop}"
+    )
+    adapter = MT5ExecutionAdapter(bridge=bridge)
+    started = datetime.now(tz=timezone.utc)
+    execution = adapter.execute(intent, at_utc=now_utc)
+    _event(
+        "market_buy",
+        started=started,
+        result=execution,
+        fill_price=execution.response.get("price"),
+        requested_price=intent.decision_price,
+    )
+    if execution.ticket is None:
+        raise RuntimeError("Demo market order did not return a broker ticket")
+    position_ticket = int(execution.ticket)
+    if not execution.filled:
+        raise RuntimeError("Demo market order did not fill; SLTP verification cannot continue")
+    position = _find_position(bridge, position_ticket)
+    actual_initial_sl = float(position.get("sl", 0.0) or 0.0)
+    if abs(actual_initial_sl - initial_stop) > max(float(contract.get("point", 0.0) or 0.0) / 2.0, 1e-10):
+        raise RuntimeError(f"Broker position SL mismatch: expected {initial_stop}, got {actual_initial_sl}")
+
+    current_tick = dict(bridge.latest_tick(intent.symbol))
+    protective_stop = _protective_stop_loss(
+        bid=float(current_tick["bid"]),
+        initial_stop=initial_stop,
+        contract=contract,
+    )
+    started = datetime.now(tz=timezone.utc)
+    modified = bridge.modify_position_sltp(position_ticket, symbol=intent.symbol, sl=protective_stop)
+    _event("modify_sltp", started=started, result=modified, requested_sl=protective_stop)
+    if not modified.ok:
+        raise RuntimeError(f"Demo SLTP modification failed: {modified.message}")
+    position = _find_position(bridge, position_ticket)
+    actual_protective_sl = float(position.get("sl", 0.0) or 0.0)
+    if abs(actual_protective_sl - protective_stop) > max(float(contract.get("point", 0.0) or 0.0) / 2.0, 1e-10):
+        raise RuntimeError(f"Broker modified SL mismatch: expected {protective_stop}, got {actual_protective_sl}")
+
+    started = datetime.now(tz=timezone.utc)
+    closed = bridge.close_position(position_ticket, comment="DEMO_ORDER_PATH_CHECK_CLOSE")
+    _event("close_position", started=started, result=closed)
+    if not closed.ok or bridge.query_positions(ticket=position_ticket):
+        raise RuntimeError("Demo position did not close cleanly")
+    print("ORDER_PATH_OK | account_flat=True")
+    return 0
+
+
+def _run_order_path_with_bridge(bridge: Any, *, symbol: str) -> int:
+    """Connect, exercise, and always clean up one symbol through a concrete bridge."""
+    canonical_symbol = symbol.strip().upper()
+    try:
+        status = bridge.connect()
+        if not status.ok:
+            raise DemoOrderPathSafetyError(f"MT5 connection failed: {status.message}")
+        return _run_connected_order_path_check(bridge, symbol=canonical_symbol)
+    finally:
+        _cleanup_test_symbol_positions(bridge, symbol=canonical_symbol)
+        try:
+            bridge.disconnect()
+        except Exception as exc:
+            print(f"ORDER_PATH_CRITICAL | disconnect_failed={type(exc).__name__}: {exc}")
+
+
 def run_order_path_check(*, config_path: Path, env_path: Path, symbol: str) -> int:
     """Run the guarded demo sequence. Call only after explicit operator approval."""
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
-    from tsp_v2.adapters.execution_adapter import MT5ExecutionAdapter
     from tsp_v2.adapters.mt5_bridge import MT5Bridge
     from tsp_v2.config import load_config
-    from tsp_v2.enums import Direction, SignalFamily
-    from tsp_v2.models import ExecutionIntent
 
     config = load_config(config_path=config_path, env_path=env_path)
     bridge = MT5Bridge(
@@ -147,80 +256,7 @@ def run_order_path_check(*, config_path: Path, env_path: Path, symbol: str) -> i
         password=config.secrets.mt5_password,
         server=config.secrets.mt5_server,
     )
-    position_ticket: int | None = None
-    try:
-        status = bridge.connect()
-        if not status.ok:
-            raise DemoOrderPathSafetyError(f"MT5 connection failed: {status.message}")
-        account, contract, tick = validate_demo_order_path_preconditions(bridge, symbol=symbol)
-        bid = float(tick["bid"])
-        ask = float(tick["ask"])
-        volume = float(contract.get("volume_min", 0.0) or 0.0)
-        if volume <= 0.0:
-            raise DemoOrderPathSafetyError("Contract volume_min must be positive")
-        initial_stop = _initial_stop_loss(ask=ask, contract=contract)
-        now_utc = datetime.now(tz=timezone.utc)
-        intent = ExecutionIntent(
-            setup_id=f"demo-order-path-{uuid4().hex[:12]}",
-            signal_family=SignalFamily.MICRO_IMPULSE,
-            symbol=symbol.strip().upper(),
-            direction=Direction.LONG,
-            decision_price=ask,
-            sized_volume=volume,
-            stop_loss_price=initial_stop,
-            submission_uuid=uuid4().hex,
-            cycle_time_utc=now_utc,
-        )
-        print(
-            "ORDER_PATH_PRECHECK | "
-            f"login={account.get('login')} | symbol={intent.symbol} | volume={volume} | "
-            f"stop_level_points={contract.get('trade_stops_level')} | spread={ask - bid} | initial_sl={initial_stop}"
-        )
-        adapter = MT5ExecutionAdapter(bridge=bridge)
-        started = datetime.now(tz=timezone.utc)
-        execution = adapter.execute(intent, at_utc=now_utc)
-        _event("market_buy", started=started, result=execution, fill_price=execution.response.get("price"), requested_price=ask)
-        if not execution.filled or execution.ticket is None:
-            raise RuntimeError("Demo market order did not fill; SLTP verification cannot continue")
-        position_ticket = int(execution.ticket)
-        position = _find_position(bridge, position_ticket)
-        actual_initial_sl = float(position.get("sl", 0.0) or 0.0)
-        if abs(actual_initial_sl - initial_stop) > max(float(contract.get("point", 0.0) or 0.0) / 2.0, 1e-10):
-            raise RuntimeError(f"Broker position SL mismatch: expected {initial_stop}, got {actual_initial_sl}")
-
-        current_tick = dict(bridge.latest_tick(intent.symbol))
-        protective_stop = _protective_stop_loss(
-            bid=float(current_tick["bid"]),
-            initial_stop=initial_stop,
-            contract=contract,
-        )
-        started = datetime.now(tz=timezone.utc)
-        modified = bridge.modify_position_sltp(position_ticket, symbol=intent.symbol, sl=protective_stop)
-        _event("modify_sltp", started=started, result=modified, requested_sl=protective_stop)
-        if not modified.ok:
-            raise RuntimeError("Demo SLTP modification failed")
-        position = _find_position(bridge, position_ticket)
-        actual_protective_sl = float(position.get("sl", 0.0) or 0.0)
-        if abs(actual_protective_sl - protective_stop) > max(float(contract.get("point", 0.0) or 0.0) / 2.0, 1e-10):
-            raise RuntimeError(f"Broker modified SL mismatch: expected {protective_stop}, got {actual_protective_sl}")
-
-        started = datetime.now(tz=timezone.utc)
-        closed = bridge.close_position(position_ticket, comment="DEMO_ORDER_PATH_CHECK_CLOSE")
-        _event("close_position", started=started, result=closed)
-        if not closed.ok or bridge.query_positions(ticket=position_ticket):
-            raise RuntimeError("Demo position did not close cleanly")
-        position_ticket = None
-        print("ORDER_PATH_OK | account_flat=True")
-        return 0
-    finally:
-        if position_ticket is not None:
-            try:
-                started = datetime.now(tz=timezone.utc)
-                result = bridge.close_position(position_ticket, comment="DEMO_ORDER_PATH_CHECK_FINALLY")
-                _event("finally_close_position", started=started, result=result)
-            except Exception as exc:
-                print(f"ORDER_PATH_CRITICAL | finally_close_failed={type(exc).__name__}: {exc}")
-        bridge.close()
+    return _run_order_path_with_bridge(bridge, symbol=symbol)
 
 
 def main(argv: list[str] | None = None) -> int:
