@@ -133,7 +133,8 @@ class MT5ExecutionAdapter:
         sell = getattr(mt5, "ORDER_TYPE_SELL", "SELL") if mt5 is not None else "SELL"
         action = getattr(mt5, "TRADE_ACTION_DEAL", "TRADE_ACTION_DEAL") if mt5 is not None else "TRADE_ACTION_DEAL"
         type_time = getattr(mt5, "ORDER_TIME_GTC", "ORDER_TIME_GTC") if mt5 is not None else "ORDER_TIME_GTC"
-        default_filling = _default_filling_mode(mt5)
+        contract = self.bridge.query_symbol_contract(intent.symbol)
+        default_filling = _default_filling_mode(mt5, contract=contract)
         order_type = buy if intent.direction is Direction.LONG else sell
         request: dict[str, Any] = {
             "action": action,
@@ -269,9 +270,22 @@ def _ttl_for_signal_family(family: Any) -> int:
     return 90
 
 
-def _default_filling_mode(mt5: Any) -> Any | None:
+def _default_filling_mode(mt5: Any, *, contract: Mapping[str, Any] | None = None) -> Any | None:
     if mt5 is None:
         return None
+    if contract is not None:
+        filling_mode = contract.get("filling_mode")
+        trade_exemode = contract.get("trade_exemode")
+        market_execution = getattr(mt5, "SYMBOL_TRADE_EXECUTION_MARKET", None)
+        if (
+            isinstance(filling_mode, int)
+            and not isinstance(filling_mode, bool)
+            and trade_exemode == market_execution
+        ):
+            if filling_mode & 1 and hasattr(mt5, "ORDER_FILLING_FOK"):
+                return getattr(mt5, "ORDER_FILLING_FOK")
+            if filling_mode & 2 and hasattr(mt5, "ORDER_FILLING_IOC"):
+                return getattr(mt5, "ORDER_FILLING_IOC")
     for name in ("ORDER_FILLING_RETURN", "ORDER_FILLING_FOK", "ORDER_FILLING_IOC"):
         if hasattr(mt5, name):
             return getattr(mt5, name)

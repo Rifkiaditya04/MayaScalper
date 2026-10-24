@@ -27,6 +27,9 @@ class FakeMT5:
     TRADE_ACTION_SLTP = 13
     ORDER_TIME_GTC = 20
     ORDER_FILLING_RETURN = 30
+    ORDER_FILLING_FOK = 31
+    ORDER_FILLING_IOC = 32
+    SYMBOL_TRADE_EXECUTION_MARKET = 2
     TRADE_RETCODE_DONE = 10009
     TRADE_RETCODE_DONE_PARTIAL = 10010
     TRADE_RETCODE_PLACED = 10011
@@ -90,6 +93,8 @@ class FakeMT5:
         )
         self._orders: tuple[object, ...] = ()
         self._deals: tuple[object, ...] = ()
+        self.symbol_filling_mode: int | None = None
+        self.symbol_trade_exemode: int | None = None
 
     def initialize(self, **kwargs):
         self.initialize_calls.append(dict(kwargs))
@@ -128,6 +133,8 @@ class FakeMT5:
             spread=2,
             digits=1,
             visible=visible,
+            filling_mode=self.symbol_filling_mode,
+            trade_exemode=self.symbol_trade_exemode,
         )
 
     def symbol_select(self, symbol, enable):
@@ -314,6 +321,37 @@ class MT5BridgeTests(unittest.TestCase):
         self.assertEqual(fake.order_requests[-1]["symbol"], "XAUUSD")
         self.assertEqual(fake.order_requests[-1]["volume"], 0.2)
         self.assertEqual(fake.order_requests[-1]["price"], 2350.0)
+
+    def test_close_position_uses_symbol_fok_filling_mode_for_market_execution(self) -> None:
+        fake = FakeMT5()
+        fake.symbol_filling_mode = 1
+        fake.symbol_trade_exemode = fake.SYMBOL_TRADE_EXECUTION_MARKET
+        bridge = MT5Bridge(mt5_module=fake)
+        bridge.connect()
+
+        bridge.close_position(10)
+
+        self.assertEqual(fake.order_requests[-1]["type_filling"], fake.ORDER_FILLING_FOK)
+
+    def test_close_position_uses_symbol_ioc_filling_mode_when_fok_is_unavailable(self) -> None:
+        fake = FakeMT5()
+        fake.symbol_filling_mode = 2
+        fake.symbol_trade_exemode = fake.SYMBOL_TRADE_EXECUTION_MARKET
+        bridge = MT5Bridge(mt5_module=fake)
+        bridge.connect()
+
+        bridge.close_position(10)
+
+        self.assertEqual(fake.order_requests[-1]["type_filling"], fake.ORDER_FILLING_IOC)
+
+    def test_close_position_without_symbol_filling_info_retains_return_mode(self) -> None:
+        fake = FakeMT5()
+        bridge = MT5Bridge(mt5_module=fake)
+        bridge.connect()
+
+        bridge.close_position(10)
+
+        self.assertEqual(fake.order_requests[-1]["type_filling"], fake.ORDER_FILLING_RETURN)
 
     def test_retryable_trade_classification(self) -> None:
         fake = FakeMT5()

@@ -1427,7 +1427,8 @@ class MT5Bridge:
             "deviation": int(deviation),
             "comment": comment or f"CLOSE_{position_ticket}",
         }
-        filling = _default_filling_mode(mt5)
+        contract = self.query_symbol_contract(symbol)
+        filling = _default_filling_mode(mt5, contract=contract)
         if filling is not None:
             request["type_filling"] = filling
         request["type_time"] = getattr(mt5, "ORDER_TIME_GTC", "ORDER_TIME_GTC")
@@ -1700,7 +1701,20 @@ def _reverse_retcode_map(mt5: Any) -> dict[int, str]:
     return mapping
 
 
-def _default_filling_mode(mt5: Any) -> Any | None:
+def _default_filling_mode(mt5: Any, *, contract: Mapping[str, Any] | None = None) -> Any | None:
+    if contract is not None:
+        filling_mode = contract.get("filling_mode")
+        trade_exemode = contract.get("trade_exemode")
+        market_execution = getattr(mt5, "SYMBOL_TRADE_EXECUTION_MARKET", None)
+        if (
+            isinstance(filling_mode, int)
+            and not isinstance(filling_mode, bool)
+            and trade_exemode == market_execution
+        ):
+            if filling_mode & 1 and hasattr(mt5, "ORDER_FILLING_FOK"):
+                return getattr(mt5, "ORDER_FILLING_FOK")
+            if filling_mode & 2 and hasattr(mt5, "ORDER_FILLING_IOC"):
+                return getattr(mt5, "ORDER_FILLING_IOC")
     for name in ("ORDER_FILLING_RETURN", "ORDER_FILLING_FOK", "ORDER_FILLING_IOC"):
         if hasattr(mt5, name):
             return getattr(mt5, name)

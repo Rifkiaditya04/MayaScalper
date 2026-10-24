@@ -20,6 +20,8 @@ class FakeBridge:
         self.mt5_module = _FakeMT5Module()
         self.place_order_requests: list[dict[str, object]] = []
         self.contract_requests: list[str] = []
+        self.filling_mode: int | None = None
+        self.trade_exemode: int | None = None
 
     def query_symbol_contract(self, symbol: str) -> dict[str, object]:
         self.contract_requests.append(symbol.upper())
@@ -34,6 +36,8 @@ class FakeBridge:
             "volume_step": 0.01,
             "trade_stops_level": 20,
             "trade_freeze_level": 0,
+            "filling_mode": self.filling_mode,
+            "trade_exemode": self.trade_exemode,
         }
 
     def place_order(self, request: dict[str, object]) -> MT5TradeResult:
@@ -50,6 +54,9 @@ class _FakeMT5Module:
     TRADE_ACTION_DEAL = 10
     ORDER_TIME_GTC = 20
     ORDER_FILLING_RETURN = 30
+    ORDER_FILLING_FOK = 31
+    ORDER_FILLING_IOC = 32
+    SYMBOL_TRADE_EXECUTION_MARKET = 2
 
 
 class ExecutionAdapterTests(unittest.TestCase):
@@ -166,6 +173,31 @@ class ExecutionAdapterTests(unittest.TestCase):
         with self.assertRaises(ConfigValidationError):
             adapter.execute(intent, at_utc=intent.cycle_time_utc + timedelta(seconds=121))
 
+    def test_market_execution_prefers_fok_when_symbol_supports_fok(self) -> None:
+        adapter, intent = self._build_adapter(_success_result())
+        adapter.bridge.filling_mode = 1
+        adapter.bridge.trade_exemode = adapter.bridge.mt5_module.SYMBOL_TRADE_EXECUTION_MARKET
+
+        adapter.execute(intent)
+
+        self.assertEqual(adapter.bridge.place_order_requests[0]["type_filling"], adapter.bridge.mt5_module.ORDER_FILLING_FOK)
+
+    def test_market_execution_uses_ioc_when_only_ioc_is_supported(self) -> None:
+        adapter, intent = self._build_adapter(_success_result())
+        adapter.bridge.filling_mode = 2
+        adapter.bridge.trade_exemode = adapter.bridge.mt5_module.SYMBOL_TRADE_EXECUTION_MARKET
+
+        adapter.execute(intent)
+
+        self.assertEqual(adapter.bridge.place_order_requests[0]["type_filling"], adapter.bridge.mt5_module.ORDER_FILLING_IOC)
+
+    def test_missing_symbol_filling_info_retains_legacy_return_mode(self) -> None:
+        adapter, intent = self._build_adapter(_success_result())
+
+        adapter.execute(intent)
+
+        self.assertEqual(adapter.bridge.place_order_requests[0]["type_filling"], adapter.bridge.mt5_module.ORDER_FILLING_RETURN)
+
     def _build_adapter(self, response: MT5TradeResult):
         cycle_time = datetime(2026, 5, 29, 10, 0, 0, tzinfo=timezone.utc)
         snapshot = MarketSnapshot(
@@ -231,3 +263,19 @@ class ExecutionAdapterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _success_result() -> MT5TradeResult:
+    return MT5TradeResult(
+        ok=True,
+        failure_class="DONE",
+        response_class="OK",
+        retryable=False,
+        fatal=False,
+        terminal=True,
+        message="filled",
+        ticket=777,
+        request={},
+        response={"retcode": "DONE", "ticket": 777},
+        diagnostics={},
+    )
