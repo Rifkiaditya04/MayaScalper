@@ -981,7 +981,9 @@ class MT5Bridge:
             effective_count: int,
             fetch_window_minutes: int,
             adaptive_attempts: int,
-            adaptive_closed_count: int,
+            adaptive_raw_count: int,
+            adaptive_min_closed_bars: int | None = None,
+            adaptive_closed_count: int | None = None,
         ) -> dict[str, Any]:
             return {
                 "fetch_method": "copy_rates_range",
@@ -994,7 +996,8 @@ class MT5Bridge:
                 "fetch_reference_time_utc": cycle_utc.isoformat(),
                 "adaptive_attempts": adaptive_attempts,
                 "adaptive_window_minutes": fetch_window_minutes,
-                "adaptive_min_closed_bars": M1_HISTORY_MIN_CLOSED_BARS,
+                "adaptive_raw_count": adaptive_raw_count,
+                "adaptive_min_closed_bars": adaptive_min_closed_bars,
                 "adaptive_closed_count": adaptive_closed_count,
             }
 
@@ -1033,7 +1036,7 @@ class MT5Bridge:
                 effective_count=len(records),
                 fetch_window_minutes=window_minutes,
                 adaptive_attempts=attempts,
-                adaptive_closed_count=raw_count,
+                adaptive_raw_count=raw_count,
             )
             return records, last_raw, metadata
 
@@ -1076,6 +1079,8 @@ class MT5Bridge:
                         effective_count=len(last_records),
                         fetch_window_minutes=lookback_minutes,
                         adaptive_attempts=attempts,
+                        adaptive_raw_count=last_raw_count,
+                        adaptive_min_closed_bars=M1_HISTORY_MIN_CLOSED_BARS,
                         adaptive_closed_count=last_closed_count,
                     )
                     return last_records, last_raw, metadata
@@ -1095,6 +1100,8 @@ class MT5Bridge:
             effective_count=len(last_records),
             fetch_window_minutes=lookback_minutes,
             adaptive_attempts=attempts,
+            adaptive_raw_count=last_raw_count,
+            adaptive_min_closed_bars=M1_HISTORY_MIN_CLOSED_BARS,
             adaptive_closed_count=last_closed_count,
         )
         return [], last_raw, metadata

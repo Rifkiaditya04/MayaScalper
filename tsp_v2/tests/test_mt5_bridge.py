@@ -683,6 +683,9 @@ class MT5BridgeTests(unittest.TestCase):
         self.assertEqual(fake.pos_calls, [])
         self.assertEqual(rates[-1]["fetch_method"], "copy_rates_range")
         self.assertEqual(rates[-1]["adaptive_attempts"], 1)
+        self.assertEqual(rates[-1]["adaptive_raw_count"], rates[-1]["returned_count"])
+        self.assertIsNone(rates[-1]["adaptive_min_closed_bars"])
+        self.assertIsNone(rates[-1]["adaptive_closed_count"])
         self.assertEqual(rates[-1]["requested_count"], 90)
         self.assertEqual(rates[-1]["fetch_window_minutes"], 460)
 
@@ -772,6 +775,9 @@ class MT5BridgeTests(unittest.TestCase):
 
         self.assertEqual(len(rates), 3)
         self.assertEqual(rates[-1]["adaptive_window_minutes"], 7 * 24 * 60)
+        self.assertEqual(rates[-1]["adaptive_raw_count"], 3)
+        self.assertIsNone(rates[-1]["adaptive_min_closed_bars"])
+        self.assertIsNone(rates[-1]["adaptive_closed_count"])
         self.assertTrue(all((call["date_to"] - call["date_from"]).total_seconds() <= 7 * 24 * 60 * 60 for call in fake.range_calls))
         self.assertEqual(fake.pos_calls, [])
 
