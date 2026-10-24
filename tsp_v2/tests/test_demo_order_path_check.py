@@ -15,12 +15,13 @@ from tsp_v2.tests.test_mt5_bridge import FakeMT5, FakeOrderResult
 
 
 class OrderPathFakeMT5(FakeMT5):
-    def __init__(self, *, reject_sltp: bool = False) -> None:
+    def __init__(self, *, reject_sltp: bool = False, partial_fill: bool = False) -> None:
         now = datetime.now(tz=timezone.utc)
         super().__init__(tick_time=now, rates_time=now)
         self._positions = ()
         self._orders = ()
         self.reject_sltp = reject_sltp
+        self.partial_fill = partial_fill
         self.next_ticket = 900
 
     def symbol_info(self, symbol):
@@ -63,13 +64,14 @@ class OrderPathFakeMT5(FakeMT5):
                     time=int(datetime.now(tz=timezone.utc).timestamp()),
                 ),
             )
-            return FakeOrderResult(self.TRADE_RETCODE_DONE, order=ticket, deal=ticket, comment="filled")
+            retcode = self.TRADE_RETCODE_DONE_PARTIAL if self.partial_fill else self.TRADE_RETCODE_DONE
+            return FakeOrderResult(retcode, order=ticket, deal=ticket, comment="filled")
         raise AssertionError(f"Unexpected order request: {request}")
 
 
 class DemoOrderPathCheckTests(unittest.TestCase):
-    def _bridge(self, *, reject_sltp: bool = False) -> tuple[MT5Bridge, OrderPathFakeMT5]:
-        fake = OrderPathFakeMT5(reject_sltp=reject_sltp)
+    def _bridge(self, *, reject_sltp: bool = False, partial_fill: bool = False) -> tuple[MT5Bridge, OrderPathFakeMT5]:
+        fake = OrderPathFakeMT5(reject_sltp=reject_sltp, partial_fill=partial_fill)
         return MT5Bridge(mt5_module=fake), fake
 
     def test_demo_flat_fresh_account_passes_read_only_preconditions(self) -> None:
@@ -105,6 +107,15 @@ class DemoOrderPathCheckTests(unittest.TestCase):
 
         self.assertEqual(fake._positions, ())
         self.assertEqual(bridge.connected, False)
+        self.assertTrue(any(request.get("position") == 900 for request in fake.order_requests))
+
+    def test_partial_fill_is_cleaned_up_by_symbol_finally(self) -> None:
+        bridge, fake = self._bridge(partial_fill=True)
+
+        with self.assertRaisesRegex(RuntimeError, "did not fill"):
+            _run_order_path_with_bridge(bridge, symbol="EURUSD")
+
+        self.assertEqual(fake._positions, ())
         self.assertTrue(any(request.get("position") == 900 for request in fake.order_requests))
 
     def test_protective_stop_remains_on_long_side_with_minimum_distance(self) -> None:
