@@ -39,7 +39,7 @@ class MT5ExecutionAdapter:
 
     def execute(self, intent: ExecutionIntent, *, at_utc: datetime | None = None) -> ExecutionResult:
         canonical_time = _ensure_utc(at_utc or intent.cycle_time_utc, field_name="at_utc")
-        self._validate_intent(intent, canonical_time)
+        contract = self._validate_intent(intent, canonical_time)
         assert self.registry is not None
 
         if self.registry.is_duplicate(intent=intent, at_utc=canonical_time):
@@ -56,8 +56,10 @@ class MT5ExecutionAdapter:
             self.last_result = result
             return result
 
+        # Resolve the contract before reserving so a bridge failure cannot leave
+        # an execution reservation behind without an order attempt.
+        request = self._build_order_request(intent, contract=contract)
         self.registry.reserve(intent, at_utc=canonical_time)
-        request = self._build_order_request(intent)
         try:
             bridge_result = self.bridge.place_order(request)
         except MT5BridgeError as exc:
@@ -90,7 +92,7 @@ class MT5ExecutionAdapter:
     def query_positions(self) -> list[dict[str, Any]]:
         return list(self.bridge.query_positions())
 
-    def _validate_intent(self, intent: ExecutionIntent, at_utc: datetime) -> None:
+    def _validate_intent(self, intent: ExecutionIntent, at_utc: datetime) -> Mapping[str, Any]:
         if intent.sized_volume <= 0.0:
             raise ConfigValidationError("Execution intent sized_volume must be positive")
         if intent.decision_price <= 0.0:
@@ -112,6 +114,7 @@ class MT5ExecutionAdapter:
             raise ConfigValidationError("Execution intent is stale")
         contract = self.bridge.query_symbol_contract(intent.symbol)
         self._validate_contract_volume(contract, intent.sized_volume)
+        return contract
 
     def _validate_contract_volume(self, contract: Mapping[str, Any], volume: float) -> None:
         min_lot = float(contract.get("volume_min", contract.get("min_lot", 0.0)))
@@ -127,13 +130,19 @@ class MT5ExecutionAdapter:
             if abs(normalized - volume) > 1e-8:
                 raise ConfigValidationError("Execution intent volume does not align with contract lot_step")
 
-    def _build_order_request(self, intent: ExecutionIntent) -> dict[str, Any]:
+    def _build_order_request(
+        self,
+        intent: ExecutionIntent,
+        *,
+        contract: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         mt5 = self.bridge.mt5_module
         buy = getattr(mt5, "ORDER_TYPE_BUY", "BUY") if mt5 is not None else "BUY"
         sell = getattr(mt5, "ORDER_TYPE_SELL", "SELL") if mt5 is not None else "SELL"
         action = getattr(mt5, "TRADE_ACTION_DEAL", "TRADE_ACTION_DEAL") if mt5 is not None else "TRADE_ACTION_DEAL"
         type_time = getattr(mt5, "ORDER_TIME_GTC", "ORDER_TIME_GTC") if mt5 is not None else "ORDER_TIME_GTC"
-        contract = self.bridge.query_symbol_contract(intent.symbol)
+        if contract is None:
+            contract = self.bridge.query_symbol_contract(intent.symbol)
         default_filling = _default_filling_mode(mt5, contract=contract)
         order_type = buy if intent.direction is Direction.LONG else sell
         request: dict[str, Any] = {

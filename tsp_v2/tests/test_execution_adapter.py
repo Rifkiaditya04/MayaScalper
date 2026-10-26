@@ -198,6 +198,15 @@ class ExecutionAdapterTests(unittest.TestCase):
 
         self.assertEqual(adapter.bridge.place_order_requests[0]["type_filling"], adapter.bridge.mt5_module.ORDER_FILLING_RETURN)
 
+    def test_contract_lookup_failure_does_not_leave_reserved_registry_entry(self) -> None:
+        adapter, intent = self._build_adapter(_success_result())
+        adapter.bridge.query_symbol_contract = _raise_contract_lookup_failure
+
+        with self.assertRaisesRegex(ConfigValidationError, "contract unavailable"):
+            adapter.execute(intent)
+
+        self.assertNotIn(intent.submission_uuid, adapter.registry.entries_by_submission_uuid)
+
     def _build_adapter(self, response: MT5TradeResult):
         cycle_time = datetime(2026, 5, 29, 10, 0, 0, tzinfo=timezone.utc)
         snapshot = MarketSnapshot(
@@ -279,3 +288,8 @@ def _success_result() -> MT5TradeResult:
         response={"retcode": "DONE", "ticket": 777},
         diagnostics={},
     )
+
+
+def _raise_contract_lookup_failure(symbol: str):
+    del symbol
+    raise ConfigValidationError("contract unavailable")
