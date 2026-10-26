@@ -15,13 +15,20 @@ from tsp_v2.tests.test_mt5_bridge import FakeMT5, FakeOrderResult
 
 
 class OrderPathFakeMT5(FakeMT5):
-    def __init__(self, *, reject_sltp: bool = False, partial_fill: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        reject_sltp: bool = False,
+        partial_fill: bool = False,
+        add_foreign_position_after_entry: bool = False,
+    ) -> None:
         now = datetime.now(tz=timezone.utc)
         super().__init__(tick_time=now, rates_time=now)
         self._positions = ()
         self._orders = ()
         self.reject_sltp = reject_sltp
         self.partial_fill = partial_fill
+        self.add_foreign_position_after_entry = add_foreign_position_after_entry
         self.next_ticket = 900
 
     def symbol_info(self, symbol):
@@ -51,27 +58,57 @@ class OrderPathFakeMT5(FakeMT5):
         if action == self.TRADE_ACTION_DEAL:
             ticket = self.next_ticket
             self.next_ticket += 1
-            self._positions = (
-                SimpleNamespace(
-                    ticket=ticket,
-                    symbol=request["symbol"],
-                    type=request["type"],
-                    volume=request["volume"],
-                    price_open=request["price"],
-                    sl=request["sl"],
-                    tp=request.get("tp", 0.0),
-                    profit=0.0,
-                    time=int(datetime.now(tz=timezone.utc).timestamp()),
-                ),
+            opened = SimpleNamespace(
+                ticket=ticket,
+                symbol=request["symbol"],
+                type=request["type"],
+                volume=request["volume"],
+                price_open=request["price"],
+                sl=request["sl"],
+                tp=request.get("tp", 0.0),
+                comment=request.get("comment", ""),
+                profit=0.0,
+                time=int(datetime.now(tz=timezone.utc).timestamp()),
             )
+            positions = (
+                *self._positions,
+                opened,
+            )
+            if self.add_foreign_position_after_entry:
+                positions = (
+                    *positions,
+                    SimpleNamespace(
+                        ticket=999,
+                        symbol=request["symbol"],
+                        type=request["type"],
+                        volume=request["volume"],
+                        price_open=request["price"],
+                        sl=request["sl"],
+                        tp=0.0,
+                        comment="unrelated-manual-position",
+                        profit=0.0,
+                        time=int(datetime.now(tz=timezone.utc).timestamp()),
+                    ),
+                )
+            self._positions = positions
             retcode = self.TRADE_RETCODE_DONE_PARTIAL if self.partial_fill else self.TRADE_RETCODE_DONE
             return FakeOrderResult(retcode, order=ticket, deal=ticket, comment="filled")
         raise AssertionError(f"Unexpected order request: {request}")
 
 
 class DemoOrderPathCheckTests(unittest.TestCase):
-    def _bridge(self, *, reject_sltp: bool = False, partial_fill: bool = False) -> tuple[MT5Bridge, OrderPathFakeMT5]:
-        fake = OrderPathFakeMT5(reject_sltp=reject_sltp, partial_fill=partial_fill)
+    def _bridge(
+        self,
+        *,
+        reject_sltp: bool = False,
+        partial_fill: bool = False,
+        add_foreign_position_after_entry: bool = False,
+    ) -> tuple[MT5Bridge, OrderPathFakeMT5]:
+        fake = OrderPathFakeMT5(
+            reject_sltp=reject_sltp,
+            partial_fill=partial_fill,
+            add_foreign_position_after_entry=add_foreign_position_after_entry,
+        )
         return MT5Bridge(mt5_module=fake), fake
 
     def test_demo_flat_fresh_account_passes_read_only_preconditions(self) -> None:
@@ -109,7 +146,7 @@ class DemoOrderPathCheckTests(unittest.TestCase):
         self.assertEqual(bridge.connected, False)
         self.assertTrue(any(request.get("position") == 900 for request in fake.order_requests))
 
-    def test_partial_fill_is_cleaned_up_by_symbol_finally(self) -> None:
+    def test_partial_fill_is_cleaned_up_when_owned_by_the_run(self) -> None:
         bridge, fake = self._bridge(partial_fill=True)
 
         with self.assertRaisesRegex(RuntimeError, "did not fill"):
@@ -117,6 +154,41 @@ class DemoOrderPathCheckTests(unittest.TestCase):
 
         self.assertEqual(fake._positions, ())
         self.assertTrue(any(request.get("position") == 900 for request in fake.order_requests))
+
+    def test_real_account_with_open_test_symbol_never_attempts_cleanup(self) -> None:
+        bridge, fake = self._bridge()
+        fake._account_info.trade_mode = 2
+        fake._positions = (
+            SimpleNamespace(ticket=700, symbol="EURUSD", type=fake.ORDER_TYPE_BUY, volume=0.01, comment="manual"),
+        )
+
+        with self.assertRaisesRegex(DemoOrderPathSafetyError, "trade_mode=0"):
+            _run_order_path_with_bridge(bridge, symbol="EURUSD")
+
+        self.assertFalse(any("position" in request for request in fake.order_requests))
+        self.assertEqual(fake._positions[0].ticket, 700)
+
+    def test_demo_account_with_open_position_never_attempts_cleanup(self) -> None:
+        bridge, fake = self._bridge()
+        fake._positions = (
+            SimpleNamespace(ticket=701, symbol="EURUSD", type=fake.ORDER_TYPE_BUY, volume=0.01, comment="manual"),
+        )
+
+        with self.assertRaisesRegex(DemoOrderPathSafetyError, "no open positions"):
+            _run_order_path_with_bridge(bridge, symbol="EURUSD")
+
+        self.assertFalse(any("position" in request for request in fake.order_requests))
+        self.assertEqual(fake._positions[0].ticket, 701)
+
+    def test_cleanup_leaves_other_position_on_same_symbol_untouched(self) -> None:
+        bridge, fake = self._bridge(reject_sltp=True, add_foreign_position_after_entry=True)
+
+        with self.assertRaisesRegex(RuntimeError, "Demo SLTP modification failed: reject sltp"):
+            _run_order_path_with_bridge(bridge, symbol="EURUSD")
+
+        self.assertEqual(tuple(position.ticket for position in fake._positions), (999,))
+        self.assertTrue(any(request.get("position") == 900 for request in fake.order_requests))
+        self.assertFalse(any(request.get("position") == 999 for request in fake.order_requests))
 
     def test_protective_stop_remains_on_long_side_with_minimum_distance(self) -> None:
         contract = {"point": 0.00001, "trade_stops_level": 10, "digits": 5}
@@ -135,3 +207,4 @@ class DemoOrderPathCheckTests(unittest.TestCase):
 
         with self.assertRaisesRegex(DemoOrderPathSafetyError, "trade_mode=0"):
             validate_demo_order_path_preconditions(bridge, symbol="EURUSD", now_utc=datetime.now(tz=timezone.utc))
+

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import sys
 import time
-from typing import Any, Mapping
+from typing import Any, Mapping, MutableMapping
 from uuid import uuid4
 
 
@@ -130,7 +130,13 @@ def _find_position(bridge: Any, ticket: int) -> dict[str, Any]:
     return dict(positions[0])
 
 
-def _cleanup_test_symbol_positions(bridge: Any, *, symbol: str) -> None:
+def _cleanup_test_run_positions(
+    bridge: Any,
+    *,
+    symbol: str,
+    setup_id: str | None,
+    position_tickets: set[int],
+) -> None:
     """Best-effort cleanup that never replaces the failure that triggered it."""
     try:
         positions = tuple(bridge.query_positions(symbol=symbol))
@@ -142,20 +148,32 @@ def _cleanup_test_symbol_positions(bridge: Any, *, symbol: str) -> None:
         try:
             if ticket is None:
                 raise RuntimeError("Broker position did not contain a ticket")
+            position_ticket = int(ticket)
+            position_comment = str(position.get("comment", ""))
+            is_owned_ticket = position_ticket in position_tickets
+            is_owned_comment = bool(setup_id and setup_id in position_comment)
+            if not (is_owned_ticket or is_owned_comment):
+                continue
             started = datetime.now(tz=timezone.utc)
-            result = bridge.close_position(int(ticket), comment="DEMO_ORDER_PATH_CHECK_FINALLY")
+            result = bridge.close_position(position_ticket, comment="DEMO_ORDER_PATH_CHECK_FINALLY")
             _event("finally_close_position", started=started, result=result)
         except Exception as exc:
             print(f"ORDER_PATH_CRITICAL | finally_close_failed={type(exc).__name__}: {exc}")
 
 
-def _run_connected_order_path_check(bridge: Any, *, symbol: str) -> int:
+def _run_connected_order_path_check(
+    bridge: Any,
+    *,
+    symbol: str,
+    preconditions: tuple[dict[str, Any], dict[str, Any], dict[str, Any]] | None = None,
+    cleanup_scope: MutableMapping[str, Any] | None = None,
+) -> int:
     """Exercise the broker path after an already-connected bridge passed safety checks."""
     from tsp_v2.adapters.execution_adapter import MT5ExecutionAdapter
     from tsp_v2.enums import Direction, SignalFamily
     from tsp_v2.models import ExecutionIntent
 
-    account, contract, tick = validate_demo_order_path_preconditions(bridge, symbol=symbol)
+    account, contract, tick = preconditions or validate_demo_order_path_preconditions(bridge, symbol=symbol)
     bid = float(tick["bid"])
     ask = float(tick["ask"])
     volume = float(contract.get("volume_min", 0.0) or 0.0)
@@ -174,6 +192,8 @@ def _run_connected_order_path_check(bridge: Any, *, symbol: str) -> int:
         submission_uuid=uuid4().hex,
         cycle_time_utc=now_utc,
     )
+    if cleanup_scope is not None:
+        cleanup_scope["setup_id"] = intent.setup_id
     print(
         "ORDER_PATH_PRECHECK | "
         f"login={account.get('login')} | symbol={intent.symbol} | volume={volume} | "
@@ -194,6 +214,8 @@ def _run_connected_order_path_check(bridge: Any, *, symbol: str) -> int:
     if execution.ticket is None:
         raise RuntimeError("Demo market order did not return a broker ticket")
     position_ticket = int(execution.ticket)
+    if cleanup_scope is not None:
+        cleanup_scope["position_tickets"].add(position_ticket)
     if not execution.filled:
         raise RuntimeError("Demo market order did not fill; SLTP verification cannot continue")
     position = _find_position(bridge, position_ticket)
@@ -229,13 +251,27 @@ def _run_connected_order_path_check(bridge: Any, *, symbol: str) -> int:
 def _run_order_path_with_bridge(bridge: Any, *, symbol: str) -> int:
     """Connect, exercise, and always clean up one symbol through a concrete bridge."""
     canonical_symbol = symbol.strip().upper()
+    cleanup_scope: dict[str, Any] = {"preconditions_passed": False, "setup_id": None, "position_tickets": set()}
     try:
         status = bridge.connect()
         if not status.ok:
             raise DemoOrderPathSafetyError(f"MT5 connection failed: {status.message}")
-        return _run_connected_order_path_check(bridge, symbol=canonical_symbol)
+        preconditions = validate_demo_order_path_preconditions(bridge, symbol=canonical_symbol)
+        cleanup_scope["preconditions_passed"] = True
+        return _run_connected_order_path_check(
+            bridge,
+            symbol=canonical_symbol,
+            preconditions=preconditions,
+            cleanup_scope=cleanup_scope,
+        )
     finally:
-        _cleanup_test_symbol_positions(bridge, symbol=canonical_symbol)
+        if cleanup_scope["preconditions_passed"]:
+            _cleanup_test_run_positions(
+                bridge,
+                symbol=canonical_symbol,
+                setup_id=cleanup_scope["setup_id"],
+                position_tickets=cleanup_scope["position_tickets"],
+            )
         try:
             bridge.disconnect()
         except Exception as exc:
