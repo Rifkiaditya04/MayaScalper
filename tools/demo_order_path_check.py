@@ -219,6 +219,16 @@ def _run_connected_order_path_check(
     if not execution.filled:
         raise RuntimeError("Demo market order did not fill; SLTP verification cannot continue")
     position = _find_position(bridge, position_ticket)
+    from tsp_v2.live_runtime import _position_matches_intent
+
+    requested_comment = f"TSP_V2|{intent.setup_id}|{intent.submission_uuid}"
+    broker_comment = str(position.get("comment", ""))
+    print(
+        "ORDER_PATH_POSITION_MATCH | "
+        f"requested_comment_length={len(requested_comment)} | broker_comment={broker_comment} | "
+        f"broker_comment_length={len(broker_comment)} | matched="
+        f"{_position_matches_intent(position, intent, result_ticket=position_ticket)}"
+    )
     actual_initial_sl = float(position.get("sl", 0.0) or 0.0)
     if abs(actual_initial_sl - initial_stop) > max(float(contract.get("point", 0.0) or 0.0) / 2.0, 1e-10):
         raise RuntimeError(f"Broker position SL mismatch: expected {initial_stop}, got {actual_initial_sl}")

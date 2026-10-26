@@ -653,11 +653,19 @@ class LiveRuntimeRunner:
         result: ExecutionResult,
     ) -> Mapping[str, Any] | None:
         records = self.bridge.query_positions(ticket=result.ticket) if result.ticket is not None else ()
-        candidates = [record for record in records if _position_matches_intent(record, intent)]
+        candidates = [
+            record
+            for record in records
+            if _position_matches_intent(record, intent, result_ticket=result.ticket)
+        ]
         if len(candidates) == 1:
             return candidates[0]
         records = self.bridge.query_positions()
-        candidates = [record for record in records if _position_matches_intent(record, intent)]
+        candidates = [
+            record
+            for record in records
+            if _position_matches_intent(record, intent, result_ticket=result.ticket)
+        ]
         return candidates[0] if len(candidates) == 1 else None
 
     def _store_runtime_state(
@@ -1040,17 +1048,29 @@ def _position_ticket(record: Mapping[str, Any]) -> int | None:
     return ticket if ticket > 0 else None
 
 
-def _position_matches_intent(record: Mapping[str, Any], intent: ExecutionIntent) -> bool:
+def _position_matches_intent(
+    record: Mapping[str, Any],
+    intent: ExecutionIntent,
+    *,
+    result_ticket: int | None = None,
+) -> bool:
     if str(record.get("symbol", "")).strip().upper() != intent.symbol.upper():
         return False
     if _direction_from_record(record) is not intent.direction:
         return False
+    if result_ticket is not None and _position_ticket(record) == result_ticket:
+        return True
     if str(record.get("setup_id", "")) == intent.setup_id:
         return True
     if str(record.get("submission_uuid", "")) == intent.submission_uuid:
         return True
     comment = str(record.get("comment", ""))
-    return comment == f"TSP_V2|{intent.setup_id}|{intent.submission_uuid}"
+    requested_comment = f"TSP_V2|{intent.setup_id}|{intent.submission_uuid}"
+    if comment == requested_comment:
+        return True
+    # MT5 brokers may truncate comments. Only accept a substantial prefix of
+    # the exact comment requested for this submission.
+    return len(comment) >= 20 and requested_comment.startswith(comment)
 
 
 def _correlation_group(symbol: str) -> str:
